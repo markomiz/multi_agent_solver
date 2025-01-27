@@ -1,0 +1,78 @@
+# Ignore build directories
+build/
+Build/
+BUILD/
+
+# Ignore CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Ignore compiled object files and binaries
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.lib
+*.a
+*.exe
+*.out
+
+# Ignore IDE-specific files
+# Visual Studio
+*.vcxproj
+*.vcxproj.user
+*.vcxproj.filters
+*.sln
+
+# CLion
+.idea/
+cmake-build-debug/
+
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+*.xcuserstate
+
+# Other IDEs
+*.project
+*.cproject
+
+# Ignore log and debugging files
+*.log
+*.trace
+
+# Ignore generated files
+*.d
+*.dep
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
+*.~lock.*
+
+# Ignore test outputs
+test-results/
+tests-output/
+
+# Ignore third-party or external libraries
+external/
+vendor/
+third_party/
+
+# Ignore general temporary or unwanted files
+*.cache
+*.temp
+*.gz
+*.zip
+*.tar
+*.rar
+*.7z
+
+# Ignore specific folders if used
+docs/generated/
+bin/
+lib/

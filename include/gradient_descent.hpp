@@ -50,9 +50,8 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
       state_trajectory = trial_trajectory;
       output.cost      = trial_cost;
     }
-    // std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " <<
-    // step_size
-    //           << std::endl;
+    std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " << step_size
+              << std::endl;
 
 
     // Check for convergence based on cost improvement

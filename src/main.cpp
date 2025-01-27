@@ -1,3 +1,4 @@
+#include <chrono>
 #include <iostream>
 
 #include <Eigen/Dense>
@@ -18,7 +19,7 @@ main( int /*num_arguments*/, char** /*arguments*/ )
 {
   // Linear dynamics
   Eigen::MatrixXd A = Eigen::MatrixXd::Identity( 4, 4 ); // State transition matrix
-  Eigen::MatrixXd B = Eigen::MatrixXd::Identity( 4, 1 ); // Control input matrix
+  Eigen::MatrixXd B = Eigen::MatrixXd::Identity( 4, 4 ); // Control input matrix
 
   // Define a classical LQR OCP
   OCP problem;
@@ -33,7 +34,7 @@ main( int /*num_arguments*/, char** /*arguments*/ )
 
   // Quadratic cost function
   Eigen::MatrixXd Q          = Eigen::MatrixXd::Identity( 4, 4 ); // State cost matrix
-  Eigen::MatrixXd R          = Eigen::MatrixXd::Identity( 1, 1 ); // Control cost matrix
+  Eigen::MatrixXd R          = Eigen::MatrixXd::Identity( 4, 4 ); // Control cost matrix
   problem.objective_function = [Q, R]( const StateTrajectory& states, const ControlTrajectory& controls ) {
     double cost = 0.0;
     for( int i = 0; i < controls.cols(); ++i )
@@ -70,14 +71,14 @@ main( int /*num_arguments*/, char** /*arguments*/ )
     return 2 * R; // Hessian ∂²l/∂u²
   };
 
-  // problem.cost_cross_term = []( const ObjectiveFunction&, const State&, const Control& ) {
-  //   return Eigen::MatrixXd::Zero( 1, 4 ); // Cross term ∂²l/∂x∂u
-  // };
+  problem.cost_cross_term = []( const ObjectiveFunction&, const State&, const Control& ) {
+    return Eigen::MatrixXd::Zero( 4, 4 ); // Cross term ∂²l/∂x∂u
+  };
 
   // Problem dimensions and time settings
-  problem.dt            = 0.1; // Time step
-  problem.horizon_steps = 50;  // Horizon length
-  problem.control_dim   = 1;
+  problem.dt            = 0.01; // Time step
+  problem.horizon_steps = 20;   // Horizon length
+  problem.control_dim   = 4;
   problem.state_dim     = 4;
 
   // Control bounds
@@ -88,15 +89,30 @@ main( int /*num_arguments*/, char** /*arguments*/ )
   problem.verify_problem();
   problem.initialize_derivatives();
 
-  // Run gradient descent solver
+  // Run gradient descent solver with timing
   int    max_iterations = 10;
   double tolerance      = 1e-5; // Convergence tolerance
 
-  auto solution_gd  = gradient_descent_solver( problem, finite_differences_gradient, max_iterations, tolerance );
-  auto solution_lqr = ilqr_solver( problem, max_iterations, tolerance );
+  auto                          start_gd    = std::chrono::high_resolution_clock::now();
+  auto                          solution_gd = gradient_descent_solver( problem, finite_differences_gradient, max_iterations, tolerance );
+  auto                          end_gd      = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed_gd  = end_gd - start_gd;
 
-  std::cout << "iLQR cost " << solution_lqr.cost << std::endl;
-  std::cout << "Gradient Descent Cost " << solution_gd.cost << std::endl;
+  // Run iLQR solver with timing
+  auto                          start_ilqr    = std::chrono::high_resolution_clock::now();
+  auto                          solution_ilqr = ilqr_solver( problem, max_iterations, tolerance );
+  auto                          end_ilqr      = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed_ilqr  = end_ilqr - start_ilqr;
+
+  // Output results
+  std::cout << "iLQR cost: " << solution_ilqr.cost << std::endl;
+  std::cout << "Gradient Descent Cost: " << solution_gd.cost << std::endl;
+
+  std::cout << "iLQR solution size: " << solution_ilqr.controls.size() << std::endl;
+  std::cout << "Gradient Descent solution size: " << solution_gd.controls.size() << std::endl;
+
+  std::cout << "Gradient Descent runtime: " << elapsed_gd.count() << " seconds" << std::endl;
+  std::cout << "iLQR runtime: " << elapsed_ilqr.count() << " seconds" << std::endl;
 
   return 0;
 }

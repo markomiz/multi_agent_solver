@@ -3,15 +3,15 @@
 
 #include <Eigen/Dense>
 
-#include "constrained_gradient_descent.hpp"
 #include "finite_differences.hpp"
-#include "gradient_descent.hpp"
-#include "ilqr.hpp"
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
 #include "solver_output.hpp"
-#include "sqp_solver.hpp"
+#include "solvers/constrained_gradient_descent.hpp"
+#include "solvers/gradient_descent.hpp"
+#include "solvers/ilqr.hpp"
+#include "solvers/osqp_solver.hpp"
 #include "types.hpp"
 #include <unsupported/Eigen/MatrixFunctions>
 
@@ -77,8 +77,8 @@ main( int /*num_arguments*/, char** /*arguments*/ )
   };
 
   // Problem dimensions and time settings
-  problem.dt            = 0.01; // Time step
-  problem.horizon_steps = 100;  // Horizon length
+  problem.dt            = 0.1; // Time step
+  problem.horizon_steps = 50;  // Horizon length
   problem.control_dim   = 4;
   problem.state_dim     = 4;
 
@@ -91,8 +91,8 @@ main( int /*num_arguments*/, char** /*arguments*/ )
   problem.initialize_derivatives();
 
   // Run gradient descent solver with timing
-  int    max_iterations = 10;
-  double tolerance      = 1e-3; // Convergence tolerance
+  int    max_iterations = 100;
+  double tolerance      = 1e-5; // Convergence tolerance
 
   auto                          start_gd    = std::chrono::high_resolution_clock::now();
   auto                          solution_gd = gradient_descent_solver( problem, finite_differences_gradient, max_iterations, tolerance );

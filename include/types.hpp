@@ -11,16 +11,20 @@ using Control           = Eigen::VectorXd;
 using ControlTrajectory = Eigen::MatrixXd;
 using StateTrajectory   = Eigen::MatrixXd;
 
-using MotionModel       = std::function<StateDerivative( const State&, const Control& )>;
+// Dynamics
+using MotionModel = std::function<StateDerivative( const State&, const Control& )>;
+
+// Cost Function
 using ObjectiveFunction = std::function<double( const StateTrajectory&, const ControlTrajectory& )>;
 
-using ConstraintViolations = Eigen::VectorXd;
-using ConstraintsFunction  = std::function<ConstraintViolations( const State&, const Control& )>;
+// Constraints
+using ConstraintViolations        = Eigen::VectorXd;
+using ConstraintsFunction         = std::function<ConstraintViolations( const State&, const Control& )>;
+using ConstraintsJacobian         = Eigen::MatrixXd;
+using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const State&, const Control& )>;
 
-using ControlGradient = Eigen::MatrixXd;
 
-
-// Analytical derivative interfaces
+// Derivative interfaces
 using DynamicsStateJacobian   = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
 using DynamicsControlJacobian = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
 using CostStateGradient       = std::function<Eigen::VectorXd( const ObjectiveFunction& objective, const State&, const Control& )>;
@@ -28,6 +32,7 @@ using CostControlGradient     = std::function<Eigen::VectorXd( const ObjectiveFu
 using CostStateHessian        = std::function<Eigen::MatrixXd( const ObjectiveFunction& objective, const State&, const Control& )>;
 using CostControlHessian      = std::function<Eigen::MatrixXd( const ObjectiveFunction& objective, const State&, const Control& )>;
 using CostCrossTerm           = std::function<Eigen::MatrixXd( const ObjectiveFunction& objective, const State&, const Control& )>;
+using ControlGradient         = Eigen::MatrixXd;
 
 // GradientComputer interface
 using GradientComputer

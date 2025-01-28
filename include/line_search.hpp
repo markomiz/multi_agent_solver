@@ -11,9 +11,9 @@
 #include "types.hpp"
 
 // Generic line search function alias
-using LineSearchFunction = std::function<double(
-  const OCP& problem, const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
-  const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt, const std::map<std::string, double>& parameters )>;
+using LineSearchFunction = std::function<
+  double( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients, const MotionModel& dynamics,
+          const ObjectiveFunction& objective_function, double dt, const std::map<std::string, double>& parameters )>;
 
 // Utility function to get parameter value with default
 inline double
@@ -25,7 +25,7 @@ get_parameter( const std::map<std::string, double>& parameters, const std::strin
 
 // Armijo line search
 inline double
-armijo_line_search( const OCP& problem, const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
+armijo_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
                     const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
                     const std::map<std::string, double>& parameters )
 {
@@ -67,9 +67,9 @@ armijo_line_search( const OCP& problem, const State& initial_state, const Contro
 
 // Backtracking line search
 inline double
-backtracking_line_search( const OCP& problem, const State& initial_state, const ControlTrajectory& controls,
-                          const ControlGradient& gradients, const MotionModel& dynamics, const ObjectiveFunction& objective_function,
-                          double dt, const std::map<std::string, double>& parameters )
+backtracking_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
+                          const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
+                          const std::map<std::string, double>& parameters )
 {
 
   double initial_step_size = get_parameter( parameters, "initial_step_size", 1.0 );
@@ -106,9 +106,9 @@ backtracking_line_search( const OCP& problem, const State& initial_state, const 
 
 // Constant step size line search for simplicity
 inline double
-constant_line_search( const OCP& /*problem*/, const State& /*initial_state*/, const ControlTrajectory& /*controls*/,
-                      const ControlGradient& /*gradients*/, const MotionModel& /*dynamics*/,
-                      const ObjectiveFunction& /*objective_function*/, double /*dt*/, const std::map<std::string, double>& parameters )
+constant_line_search( const State& /*initial_state*/, const ControlTrajectory& /*controls*/, const ControlGradient& /*gradients*/,
+                      const MotionModel& /*dynamics*/, const ObjectiveFunction& /*objective_function*/, double /*dt*/,
+                      const std::map<std::string, double>& parameters )
 {
 
   return get_parameter( parameters, "step_size", 0.1 );

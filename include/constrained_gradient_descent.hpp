@@ -3,6 +3,7 @@
 
 #include <Eigen/Dense>
 
+#include "constraint_helpers.hpp"
 #include "finite_differences.hpp"
 #include "integrator.hpp"
 #include "line_search.hpp"
@@ -10,11 +11,23 @@
 #include "solver_output.hpp"
 #include "types.hpp"
 
-inline SolverOutput
-gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_computer, int max_iterations, double tolerance,
-                         const LineSearchFunction& line_search_function = armijo_line_search )
+SolverOutput
+constrained_gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_computer, int max_iterations, double tolerance,
+                                     const LineSearchFunction& line_search_function = armijo_line_search )
 {
   SolverOutput output;
+
+  // Initialize Lagrange multipliers and penalty parameter
+  ConstraintViolations equality_multipliers   = problem.equality_constraints
+                                                ? ConstraintViolations::Zero(
+                                                  problem.equality_constraints( problem.initial_state, {} ).size() )
+                                                : ConstraintViolations();
+  ConstraintViolations inequality_multipliers = problem.inequality_constraints
+                                                ? ConstraintViolations::Zero(
+                                                    problem.inequality_constraints( problem.initial_state, {} ).size() )
+                                                : ConstraintViolations();
+  double               penalty_parameter      = 1.0;
+
   // Initialize control trajectory
   output.controls        = ControlTrajectory::Zero( problem.control_dim, problem.horizon_steps );
   auto& controls         = output.controls;
@@ -22,7 +35,8 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
 
   // Integrate the initial state trajectory and compute the initial cost
   state_trajectory = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
-  output.cost      = problem.objective_function( state_trajectory, controls );
+  output.cost      = compute_augmented_cost( problem, equality_multipliers, inequality_multipliers, penalty_parameter, state_trajectory,
+                                             controls );
 
   for( int iter = 0; iter < max_iterations; ++iter )
   {
@@ -42,9 +56,11 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
       clamp_controls( trial_controls, problem.input_lower_bounds.value(), problem.input_upper_bounds.value() );
     }
 
+    // Integrate trajectory with trial controls
     StateTrajectory trial_trajectory = integrate_horizon( problem.initial_state, trial_controls, problem.dt, problem.dynamics,
                                                           integrate_rk4 );
-    double          trial_cost       = problem.objective_function( trial_trajectory, trial_controls );
+    double trial_cost = compute_augmented_cost( problem, equality_multipliers, inequality_multipliers, penalty_parameter, trial_trajectory,
+                                                trial_controls );
 
     // Update solution only if cost improves
     double old_cost = output.cost;
@@ -54,11 +70,15 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
       state_trajectory = trial_trajectory;
       output.cost      = trial_cost;
     }
-    std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " << step_size
-              << std::endl;
 
+    // Update multipliers and penalty parameter across the entire horizon
+    update_lagrange_multipliers( problem, state_trajectory, controls, equality_multipliers, inequality_multipliers, penalty_parameter );
+    increase_penalty_parameter( penalty_parameter, problem, state_trajectory, controls, tolerance );
 
-    // Check for convergence based on cost improvement
+    std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm()
+              << ", Step Size: " << step_size << ", Penalty Parameter: " << penalty_parameter << std::endl;
+
+    // Check for convergence
     if( std::abs( old_cost - trial_cost ) < tolerance )
     {
       break;

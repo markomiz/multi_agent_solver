@@ -22,16 +22,13 @@ struct OCP
   double dt;
 
   // Static bounds
-  std::optional<Eigen::VectorXd> state_lower_bounds;
-  std::optional<Eigen::VectorXd> state_upper_bounds;
-  std::optional<Eigen::VectorXd> input_lower_bounds;
-  std::optional<Eigen::VectorXd> input_upper_bounds;
+  std::optional<State>   state_lower_bounds;
+  std::optional<State>   state_upper_bounds;
+  std::optional<Control> input_lower_bounds;
+  std::optional<Control> input_upper_bounds;
 
-  // General inequality constraints: g(x,u) <= 0
-  std::optional<ConstraintsFunction> inequality_constraints;
-
-  // equality constraints: h(x,u) = 0
-  std::optional<ConstraintsFunction> equality_constraints;
+  ConstraintsFunction equality_constraints;
+  ConstraintsFunction inequality_constraints;
 
   // Optional analytical derivatives
   DynamicsStateJacobian   dynamics_state_jacobian;
@@ -45,6 +42,7 @@ struct OCP
   void
   initialize_derivatives()
   {
+    // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )
       dynamics_state_jacobian = compute_dynamics_state_jacobian;
     if( !dynamics_control_jacobian )
@@ -105,14 +103,14 @@ struct OCP
     [[maybe_unused]] double cost          = objective_function( test_states, test_controls );
 
     // If constraints exist, test them
-    if( inequality_constraints.has_value() )
+    if( inequality_constraints )
     {
-      ConstraintViolations violations = inequality_constraints.value()( test_state, test_control );
+      ConstraintViolations violations = inequality_constraints( test_state, test_control );
       assert( violations.size() >= 0 && "Inequality constraints output invalid size" );
     }
-    if( equality_constraints.has_value() )
+    if( equality_constraints )
     {
-      ConstraintViolations violations = equality_constraints.value()( test_state, test_control );
+      ConstraintViolations violations = equality_constraints( test_state, test_control );
       assert( violations.size() >= 0 && "Equality constraints output invalid size" );
     }
 

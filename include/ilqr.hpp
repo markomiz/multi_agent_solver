@@ -5,7 +5,7 @@
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
-#include "solver_ouput.hpp"
+#include "solver_output.hpp"
 #include "types.hpp"
 
 // iLQR Solver
@@ -49,13 +49,6 @@ ilqr_solver( const OCP& problem, int max_iterations = 100, double tolerance = 1e
       l_uu = problem.cost_control_hessian( problem.objective_function, states.col( t ), controls.col( t ) );
       l_ux = problem.cost_cross_term( problem.objective_function, states.col( t ), controls.col( t ) );
 
-      // Scale derivatives by dt - is this really necessary?
-      // l_x  *= problem.dt;
-      // l_u  *= problem.dt;
-      // l_xx *= problem.dt;
-      // l_uu *= problem.dt;
-      // l_ux *= problem.dt;
-
       // Compute Q terms
       Q_x  = l_x + A.transpose() * V_x;
       Q_u  = l_u + B.transpose() * V_x;
@@ -82,9 +75,6 @@ ilqr_solver( const OCP& problem, int max_iterations = 100, double tolerance = 1e
       V_x  = Q_x + K.transpose() * Q_uu * k;
       V_xx = Q_xx + K.transpose() * Q_uu * K;
 
-      V_x  *= problem.dt;
-      V_xx *= problem.dt;
-
       V_xx = 0.5 * ( V_xx + V_xx.transpose() );
     }
 
@@ -95,11 +85,15 @@ ilqr_solver( const OCP& problem, int max_iterations = 100, double tolerance = 1e
     }
 
     // Perform line search
-    double step_size = armijo_line_search( problem, problem.initial_state, controls, full_control_gradient, problem.dynamics,
+    double step_size = armijo_line_search( problem.initial_state, controls, full_control_gradient, problem.dynamics,
                                            problem.objective_function, problem.dt, {} );
 
     // Create trial solution with updated controls
     ControlTrajectory trial_controls = controls - step_size * full_control_gradient;
+    if( problem.input_lower_bounds && problem.input_upper_bounds )
+    {
+      clamp_controls( trial_controls, problem.input_lower_bounds.value(), problem.input_upper_bounds.value() );
+    }
 
     StateTrajectory trial_trajectory = integrate_horizon( problem.initial_state, trial_controls, problem.dt, problem.dynamics,
                                                           integrate_rk4 );

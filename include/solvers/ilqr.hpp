@@ -48,7 +48,6 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
   // K[t] is an n_u x n_x matrix, k[t] is n_u x 1
   std::vector<Eigen::MatrixXd> K( T, Eigen::MatrixXd::Zero( n_u, n_x ) );
   std::vector<Eigen::VectorXd> k( T, Eigen::VectorXd::Zero( n_u ) );
-
   for( int iter = 0; iter < max_iterations; ++iter )
   {
 
@@ -78,10 +77,12 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
       Eigen::MatrixXd             Q_uu_reg = Q_uu;
       Eigen::LLT<Eigen::MatrixXd> llt( Q_uu_reg );
       // minimal approach: keep adding small diag until success
+      double reg_term = 1e-6;
       while( llt.info() != Eigen::Success )
       {
-        Q_uu_reg += 1e-6 * Eigen::MatrixXd::Identity( n_u, n_u );
+        Q_uu_reg += reg_term * Eigen::MatrixXd::Identity( n_u, n_u );
         llt.compute( Q_uu_reg );
+        reg_term *= 10;
       }
       // get inverse from factor
       Eigen::MatrixXd Q_uu_inv = llt.solve( Eigen::MatrixXd::Identity( n_u, n_u ) );
@@ -165,7 +166,6 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
       cost = best_cost;
     }
   } // end main iLQR iteration
-
   // Return solution
   SolverOutput sol;
   sol.cost       = cost;

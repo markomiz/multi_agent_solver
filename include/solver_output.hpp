@@ -7,3 +7,5 @@ struct SolverOutput
   ControlTrajectory controls;
   StateTrajectory   trajectory;
 };
+
+using Solver = std::function<SolverOutput( const OCP&, int, double )>;

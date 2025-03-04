@@ -5,6 +5,9 @@
 
 #include "types.hpp"
 
+#pragma once
+#include "types.hpp"
+
 // Single-step Euler integration
 inline State
 integrate_euler( const State& current_state, const Control& control, double dt, const MotionModel& motion_model )

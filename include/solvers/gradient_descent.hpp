@@ -1,3 +1,4 @@
+#pragma once
 #include <functional>
 #include <iostream>
 
@@ -11,8 +12,7 @@
 #include "types.hpp"
 
 inline SolverOutput
-gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_computer, int max_iterations, double tolerance,
-                         const LineSearchFunction& line_search_function = armijo_line_search )
+gradient_descent_solver( const OCP& problem, int max_iterations, double tolerance )
 {
   SolverOutput output;
   // Initialize control trajectory
@@ -27,12 +27,12 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
   for( int iter = 0; iter < max_iterations; ++iter )
   {
     // Compute the gradients
-    ControlGradient gradients = gradient_computer( problem.initial_state, controls, problem.dynamics, problem.objective_function,
-                                                   problem.dt );
+    ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics, problem.objective_function,
+                                                             problem.dt );
 
     // Perform line search to find optimal step size
-    double step_size = line_search_function( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
-                                             problem.dt, {} );
+    double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
+                                           problem.dt, {} );
 
     // Create trial solution with updated controls
     ControlTrajectory trial_controls = controls - step_size * gradients;
@@ -54,8 +54,9 @@ gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_co
       state_trajectory = trial_trajectory;
       output.cost      = trial_cost;
     }
-    std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " << step_size
-              << std::endl;
+    // std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " <<
+    // step_size
+    //           << std::endl;
 
 
     // Check for convergence based on cost improvement

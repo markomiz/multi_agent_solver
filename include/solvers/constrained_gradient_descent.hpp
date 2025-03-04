@@ -1,3 +1,4 @@
+#pragma once
 #include <functional>
 #include <iostream>
 
@@ -12,8 +13,7 @@
 #include "types.hpp"
 
 SolverOutput
-constrained_gradient_descent_solver( const OCP& problem, const GradientComputer& gradient_computer, int max_iterations, double tolerance,
-                                     const LineSearchFunction& line_search_function = armijo_line_search )
+constrained_gradient_descent_solver( const OCP& problem, int max_iterations, double tolerance )
 {
   SolverOutput output;
 
@@ -41,12 +41,12 @@ constrained_gradient_descent_solver( const OCP& problem, const GradientComputer&
   for( int iter = 0; iter < max_iterations; ++iter )
   {
     // Compute the gradients
-    ControlGradient gradients = gradient_computer( problem.initial_state, controls, problem.dynamics, problem.objective_function,
-                                                   problem.dt );
+    ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics, problem.objective_function,
+                                                             problem.dt );
 
     // Perform line search to find optimal step size
-    double step_size = line_search_function( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
-                                             problem.dt, {} );
+    double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
+                                           problem.dt, {} );
 
     // Create trial solution with updated controls
     ControlTrajectory trial_controls = controls - step_size * gradients;
@@ -75,8 +75,8 @@ constrained_gradient_descent_solver( const OCP& problem, const GradientComputer&
     update_lagrange_multipliers( problem, state_trajectory, controls, equality_multipliers, inequality_multipliers, penalty_parameter );
     increase_penalty_parameter( penalty_parameter, problem, state_trajectory, controls, tolerance );
 
-    std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm()
-              << ", Step Size: " << step_size << ", Penalty Parameter: " << penalty_parameter << std::endl;
+    // std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm()
+    //           << ", Step Size: " << step_size << ", Penalty Parameter: " << penalty_parameter << std::endl;
 
     // Check for convergence
     if( std::abs( old_cost - trial_cost ) < tolerance )

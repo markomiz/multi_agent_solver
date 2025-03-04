@@ -1,243 +1,368 @@
 #pragma once
 
+#include <cmath>
+
+#include <algorithm>
+#include <stdexcept>
+#include <vector>
+
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 
-#include "integrator.hpp"
-#include "ocp.hpp"
-#include "solver_output.hpp"
+#include "integrator.hpp"    // must provide integrate_horizon() and integrate_rk4()
+#include "ocp.hpp"           // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
+#include "solver_output.hpp" // defines SolverOutput
 #include <OsqpEigen/OsqpEigen.h>
 
-namespace
+//====================================================================
+// 1. QP Data Structure and Helper Functions in a Namespace
+//====================================================================
+
+namespace osqp_solver_ns
 {
 
-// Helper to construct Hessian matrix
-Eigen::SparseMatrix<double>
-construct_hessian( const OCP& problem, const StateTrajectory& states, const ControlTrajectory& controls )
+// QPData structure collects the matrices and vectors for the QP
+struct QPData
 {
-  int                                 n_u = problem.control_dim;
-  int                                 n_x = problem.state_dim;
-  int                                 T   = problem.horizon_steps;
-  Eigen::SparseMatrix<double>         H( ( T + 1 ) * n_x + T * n_u, ( T + 1 ) * n_x + T * n_u );
-  std::vector<Eigen::Triplet<double>> H_triplets;
+  Eigen::SparseMatrix<double> H;        // Hessian matrix (P)
+  Eigen::VectorXd             gradient; // Linear cost term (q)
+  Eigen::SparseMatrix<double> A;        // Constraint matrix
+  Eigen::VectorXd             lb;       // Lower bounds for constraints
+  Eigen::VectorXd             ub;       // Upper bounds for constraints
+};
 
-  for( int t = 0; t < T; ++t )
-  {
-    Eigen::MatrixXd R = problem.cost_control_hessian( problem.objective_function, states.col( t ), controls.col( t ) );
-    for( int i = 0; i < n_u; ++i )
-    {
-      H_triplets.emplace_back( ( T + 1 ) * n_x + t * n_u + i, ( T + 1 ) * n_x + t * n_u + i, R( i, i ) );
-    }
-  }
+//---------------------------------------------------------------------
+// construct_hessian:
+// Build the Hessian matrix for the QP by stacking the (diagonal)
+// contributions from the state and control cost Hessians.
+// For each time step, we use the cost Hessian computed (via finite differences)
+// from the stage cost. Negative curvature is clamped to 0 and a small
+// regularization "reg" is added.
+// qp_dim = (T+1)*n_x + T*n_u.
+//---------------------------------------------------------------------
+inline Eigen::SparseMatrix<double>
+construct_hessian( const OCP &problem, const StateTrajectory &states, const ControlTrajectory &controls, double reg )
+{
+  int n_x    = problem.state_dim;
+  int n_u    = problem.control_dim;
+  int T      = problem.horizon_steps;
+  int qp_dim = ( T + 1 ) * n_x + T * n_u;
 
+  std::vector<Eigen::Triplet<double>> triplets;
+  // Reserve space (estimate): each block contributes one entry per variable.
+  triplets.reserve( ( T + 1 ) * n_x + T * n_u );
+
+  // --- State Blocks ---
   for( int t = 0; t < T + 1; ++t )
   {
-    Eigen::MatrixXd Q = problem.cost_state_hessian( problem.objective_function, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
+    // For terminal time t==T, if a dedicated terminal cost is not available, use the stage cost Hessian.
+    Eigen::MatrixXd Q;
+    if( t == T )
+      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
+    else
+      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( t ) );
     for( int i = 0; i < n_x; ++i )
     {
-      H_triplets.emplace_back( t * n_x + i, t * n_x + i, Q( i, i ) );
+      int    idx   = t * n_x + i;
+      double diag  = Q( i, i );
+      double value = std::max( diag, 0.0 ) + reg;
+      triplets.push_back( Eigen::Triplet<double>( idx, idx, value ) );
     }
   }
 
-  H.setFromTriplets( H_triplets.begin(), H_triplets.end() );
+  // --- Control Blocks ---
+  for( int t = 0; t < T; ++t )
+  {
+    Eigen::MatrixXd R = problem.cost_control_hessian( problem.stage_cost, states.col( t ), controls.col( t ) );
+    for( int i = 0; i < n_u; ++i )
+    {
+      int    idx   = ( T + 1 ) * n_x + t * n_u + i;
+      double diag  = R( i, i );
+      double value = std::max( diag, 0.0 ) + reg;
+      triplets.push_back( Eigen::Triplet<double>( idx, idx, value ) );
+    }
+  }
+
+  Eigen::SparseMatrix<double> H( qp_dim, qp_dim );
+  H.setFromTriplets( triplets.begin(), triplets.end() );
   return H;
 }
 
-// Helper to construct gradient vector
-Eigen::VectorXd
-construct_gradient( const OCP& problem, const StateTrajectory& states, const ControlTrajectory& controls )
+//---------------------------------------------------------------------
+// construct_gradient:
+// Build the gradient vector q by stacking the cost gradients for each
+// state and control. The state gradients are computed using cost_state_gradient,
+// and similarly for controls.
+//---------------------------------------------------------------------
+inline Eigen::VectorXd
+construct_gradient( const OCP &problem, const StateTrajectory &states, const ControlTrajectory &controls )
 {
-  int             n_x      = problem.state_dim;
-  int             n_u      = problem.control_dim;
-  int             T        = problem.horizon_steps;
-  Eigen::VectorXd gradient = Eigen::VectorXd::Zero( ( T + 1 ) * n_x + T * n_u );
+  int n_x    = problem.state_dim;
+  int n_u    = problem.control_dim;
+  int T      = problem.horizon_steps;
+  int qp_dim = ( T + 1 ) * n_x + T * n_u;
 
-  for( int t = 0; t < T; ++t )
-  {
-    Eigen::VectorXd g_u = problem.cost_control_gradient( problem.objective_function, states.col( t ), controls.col( t ) );
-    for( int i = 0; i < n_u; ++i )
-    {
-      gradient( ( T + 1 ) * n_x + t * n_u + i ) = g_u( i );
-    }
-  }
-
+  Eigen::VectorXd q = Eigen::VectorXd::Zero( qp_dim );
+  // State gradients:
   for( int t = 0; t < T + 1; ++t )
   {
-    Eigen::VectorXd g_x = problem.cost_state_gradient( problem.objective_function, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
-    for( int i = 0; i < n_x; ++i )
-    {
-      gradient( t * n_x + i ) = g_x( i );
-    }
+    Eigen::VectorXd g;
+    if( t == T )
+      g = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
+    else
+      g = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
+    q.segment( t * n_x, n_x ) = g;
   }
-
-  return gradient;
+  // Control gradients:
+  for( int t = 0; t < T; ++t )
+  {
+    Eigen::VectorXd g                           = problem.cost_control_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
+    q.segment( ( T + 1 ) * n_x + t * n_u, n_u ) = g;
+  }
+  return q;
 }
 
-// Helper to construct constraint matrix
-Eigen::SparseMatrix<double>
-construct_constraints( const OCP& problem, const StateTrajectory& states, const ControlTrajectory& controls )
+//---------------------------------------------------------------------
+// construct_constraints:
+// Build the constraint matrix A for the dynamics constraints only.
+// For each time step t = 0,...,T-1, we enforce:
+//   x_{t+1} - A_t*x_t - B_t*u_t = 0,
+// where A_t and B_t are the dynamics Jacobians at time t.
+// The resulting A is of size (T*n_x) x qp_dim.
+//---------------------------------------------------------------------
+inline Eigen::SparseMatrix<double>
+construct_constraints( const OCP &problem, const StateTrajectory &states, const ControlTrajectory &controls )
 {
-  int                                 n_x = problem.state_dim;
-  int                                 n_u = problem.control_dim;
-  int                                 T   = problem.horizon_steps;
-  std::vector<Eigen::Triplet<double>> A_c_triplets;
+  int n_x             = problem.state_dim;
+  int n_u             = problem.control_dim;
+  int T               = problem.horizon_steps;
+  int num_constraints = T * n_x;
+  int qp_dim          = ( T + 1 ) * n_x + T * n_u;
+
+  std::vector<Eigen::Triplet<double>> triplets;
+  // Reserve an estimated number of nonzeros.
+  triplets.reserve( T * ( n_x + n_x * n_x + n_x * n_u ) );
 
   for( int t = 0; t < T; ++t )
   {
+    int row_offset = t * n_x;
+    // For x_{t+1}: coefficient +I.
     for( int i = 0; i < n_x; ++i )
     {
-      A_c_triplets.emplace_back( t * n_x + i, t * n_x + i, -1.0 );
+      int col = ( t + 1 ) * n_x + i;
+      triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, 1.0 ) );
     }
-
-    Eigen::MatrixXd A = problem.dynamics_state_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
+    // For x_t: coefficient -A_t.
+    Eigen::MatrixXd A_mat = problem.dynamics_state_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
     for( int i = 0; i < n_x; ++i )
     {
       for( int j = 0; j < n_x; ++j )
       {
-        if( A( i, j ) != 0.0 )
-        {
-          A_c_triplets.emplace_back( ( t + 1 ) * n_x + i, t * n_x + j, A( i, j ) );
-        }
+        int col = t * n_x + j;
+        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -A_mat( i, j ) ) );
       }
     }
-
-    Eigen::MatrixXd B = problem.dynamics_control_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
+    // For u_t: coefficient -B_t.
+    Eigen::MatrixXd B_mat = problem.dynamics_control_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
     for( int i = 0; i < n_x; ++i )
     {
       for( int j = 0; j < n_u; ++j )
       {
-        if( B( i, j ) != 0.0 )
-        {
-          A_c_triplets.emplace_back( ( t + 1 ) * n_x + i, ( T + 1 ) * n_x + t * n_u + j, B( i, j ) );
-        }
+        int col = ( T + 1 ) * n_x + t * n_u + j;
+        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -B_mat( i, j ) ) );
       }
     }
   }
 
-  for( int t = 0; t < T + 1; ++t )
-  {
-    for( int i = 0; i < n_x; ++i )
-    {
-      A_c_triplets.emplace_back( ( T + t ) * n_x + i, t * n_x + i, 1.0 );
-    }
-  }
-
-  for( int t = 0; t < T; ++t )
-  {
-    for( int i = 0; i < n_u; ++i )
-    {
-      A_c_triplets.emplace_back( ( T + T + t ) * n_u + i, ( T + 1 ) * n_x + t * n_u + i, 1.0 );
-    }
-  }
-
-  Eigen::SparseMatrix<double> A_c( ( T + 1 ) * n_x + ( T + 1 ) * n_x + T * n_u, ( T + 1 ) * n_x + T * n_u );
-  A_c.setFromTriplets( A_c_triplets.begin(), A_c_triplets.end() );
-  return A_c;
+  Eigen::SparseMatrix<double> A( num_constraints, qp_dim );
+  A.setFromTriplets( triplets.begin(), triplets.end() );
+  return A;
 }
 
-// Helper to construct bounds
-std::pair<Eigen::VectorXd, Eigen::VectorXd>
-construct_bounds( const OCP& problem )
+//---------------------------------------------------------------------
+// construct_bounds:
+// For the dynamics constraints, the equality is enforced by setting
+// l = u = 0. (If there is a constant offset c, it would appear here.)
+//---------------------------------------------------------------------
+inline std::pair<Eigen::VectorXd, Eigen::VectorXd>
+construct_bounds( const OCP &problem )
 {
-  int             n_x = problem.state_dim;
-  int             n_u = problem.control_dim;
-  int             T   = problem.horizon_steps;
-  Eigen::VectorXd l   = Eigen::VectorXd::Zero( ( T + 1 ) * n_x + ( T + 1 ) * n_x + T * n_u );
-  Eigen::VectorXd u   = Eigen::VectorXd::Zero( ( T + 1 ) * n_x + ( T + 1 ) * n_x + T * n_u );
-
-  l.head( ( T + 1 ) * n_x ).setZero();
-  u.head( ( T + 1 ) * n_x ).setZero();
-
-  if( problem.state_lower_bounds.has_value() && problem.state_upper_bounds.has_value() )
-  {
-    for( int t = 0; t < T + 1; ++t )
-    {
-      l.segment( ( T + t ) * n_x, n_x ) = *problem.state_lower_bounds;
-      u.segment( ( T + t ) * n_x, n_x ) = *problem.state_upper_bounds;
-    }
-  }
-
-  if( problem.input_lower_bounds.has_value() && problem.input_upper_bounds.has_value() )
-  {
-    for( int t = 0; t < T; ++t )
-    {
-      l.segment( ( T + T + t ) * n_u, n_u ) = *problem.input_lower_bounds;
-      u.segment( ( T + T + t ) * n_u, n_u ) = *problem.input_upper_bounds;
-    }
-  }
-
-  return { l, u };
+  int             n_x             = problem.state_dim;
+  int             T               = problem.horizon_steps;
+  int             num_constraints = T * n_x;
+  Eigen::VectorXd lb              = Eigen::VectorXd::Zero( num_constraints );
+  Eigen::VectorXd ub              = Eigen::VectorXd::Zero( num_constraints );
+  return { lb, ub };
 }
 
-} // namespace
-
-SolverOutput
-osqp_solver( const OCP& problem, int max_iterations = 100, double tolerance = 1e-5 )
+//---------------------------------------------------------------------
+// constructQPData:
+// Combines the Hessian, gradient, constraints, and bounds into a QPData struct.
+// reg is the regularization parameter for the Hessian.
+//---------------------------------------------------------------------
+inline QPData
+constructQPData( const OCP &problem, const StateTrajectory &states, const ControlTrajectory &controls, double reg = 0.0 )
 {
-  const int horizon_steps = problem.horizon_steps;
-  const int state_dim     = problem.state_dim;
-  const int control_dim   = problem.control_dim;
+  QPData qpData;
+  qpData.H        = construct_hessian( problem, states, controls, reg );
+  qpData.gradient = construct_gradient( problem, states, controls );
+  qpData.A        = construct_constraints( problem, states, controls );
+  auto bounds     = construct_bounds( problem );
+  qpData.lb       = bounds.first;
+  qpData.ub       = bounds.second;
+  return qpData;
+}
 
-  StateTrajectory   states   = StateTrajectory::Zero( state_dim, horizon_steps + 1 );
-  ControlTrajectory controls = ControlTrajectory::Zero( control_dim, horizon_steps );
+} // end namespace osqp_solver_ns
+
+//====================================================================
+// 2. OSQP Solver Function
+//====================================================================
+//
+// This function sets up an OSQP problem and then iteratively updates it.
+// At each iteration, it:
+//  - Recomputes the QP data (objective and constraints) based on the current
+//    state and control trajectories,
+//  - Attempts to update the Hessian with adaptive regularization if necessary,
+//  - Solves the QP,
+//  - Extracts the new control trajectory,
+//  - Propagates the state trajectory via forward integration,
+//  - Checks for convergence.
+//
+// The function returns a SolverOutput that contains the final cost,
+// state trajectory, and control trajectory.
+//
+inline SolverOutput
+osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
+{
+  using namespace osqp_solver_ns;
+  int T           = problem.horizon_steps;
+  int n_x         = problem.state_dim;
+  int n_u         = problem.control_dim;
+  int numStates   = T + 1;
+  int numControls = T;
+  int qp_dim      = numStates * n_x + numControls * n_u;
+
+  // Initialize state and control trajectories.
+  StateTrajectory   states   = StateTrajectory::Zero( n_x, numStates );
+  ControlTrajectory controls = ControlTrajectory::Zero( n_u, numControls );
   states.col( 0 )            = problem.initial_state;
-
+  // Generate an initial trajectory (e.g. with zero controls):
+  states      = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
   double cost = problem.objective_function( states, controls );
 
+  // Create OSQP solver instance.
+  OsqpEigen::Solver solver;
+  double            initial_reg = 0.0;
+  QPData            qpData      = constructQPData( problem, states, controls, initial_reg );
+
+  solver.data()->setNumberOfVariables( qp_dim );
+  solver.data()->setNumberOfConstraints( qpData.A.rows() );
+
+  if( !solver.data()->setHessianMatrix( qpData.H ) )
+    throw std::runtime_error( "Failed to set Hessian." );
+  if( !solver.data()->setGradient( qpData.gradient ) )
+    throw std::runtime_error( "Failed to set gradient." );
+  if( !solver.data()->setLinearConstraintsMatrix( qpData.A ) )
+    throw std::runtime_error( "Failed to set constraint matrix." );
+  if( !solver.data()->setLowerBound( qpData.lb ) )
+    throw std::runtime_error( "Failed to set lower bounds." );
+  if( !solver.data()->setUpperBound( qpData.ub ) )
+    throw std::runtime_error( "Failed to set upper bounds." );
+
+  solver.settings()->setWarmStart( true );
+  solver.settings()->setVerbosity( false );
+  if( !solver.initSolver() )
+    throw std::runtime_error( "Failed to initialize OSQP solver." );
+
+  // Prepare parameters for the Armijo line search.
+  std::map<std::string, double> ls_parameters = {
+    { "initial_step_size",  1.0 },
+    {              "beta",  0.5 },
+    {                "c1", 1e-6 }
+  };
+
+  // Main iterative loop.
   for( int iter = 0; iter < max_iterations; ++iter )
   {
-    Eigen::SparseMatrix<double> H        = construct_hessian( problem, states, controls );
-    Eigen::VectorXd             gradient = construct_gradient( problem, states, controls );
-    Eigen::SparseMatrix<double> A_c      = construct_constraints( problem, states, controls );
-    auto [l, u]                          = construct_bounds( problem );
+    // Adaptive Hessian regularization.
+    double                      current_reg     = 0.0;
+    const int                   max_attempts    = 10;
+    bool                        hessian_updated = false;
+    Eigen::SparseMatrix<double> H_temp;
+    for( int attempt = 0; attempt < max_attempts; ++attempt )
+    {
+      H_temp = construct_hessian( problem, states, controls, current_reg );
+      if( solver.updateHessianMatrix( H_temp ) )
+      {
+        hessian_updated = true;
+        break;
+      }
+      current_reg = ( current_reg == 0.0 ) ? 1e-6 : current_reg * 10;
+    }
+    if( !hessian_updated )
+      throw std::runtime_error( "Failed to update Hessian even with adaptive regularization." );
 
-    OsqpEigen::Solver solver;
-    solver.data()->setNumberOfVariables( H.cols() );
-    solver.data()->setNumberOfConstraints( A_c.rows() );
+    qpData = constructQPData( problem, states, controls, current_reg );
+    if( !solver.updateGradient( qpData.gradient ) )
+      throw std::runtime_error( "Failed to update gradient." );
+    if( !solver.updateLinearConstraintsMatrix( qpData.A ) )
+      throw std::runtime_error( "Failed to update constraint matrix." );
+    if( !solver.updateLowerBound( qpData.lb ) )
+      throw std::runtime_error( "Failed to update lower bounds." );
+    if( !solver.updateUpperBound( qpData.ub ) )
+      throw std::runtime_error( "Failed to update upper bounds." );
 
-    if( !solver.data()->setHessianMatrix( H ) )
-      throw std::runtime_error( "Failed to set Hessian." );
-    if( !solver.data()->setGradient( gradient ) )
-      throw std::runtime_error( "Failed to set gradient." );
-    if( !solver.data()->setLinearConstraintsMatrix( A_c ) )
-      throw std::runtime_error( "Failed to set constraint matrix." );
-    if( !solver.data()->setLowerBound( l ) )
-      throw std::runtime_error( "Failed to set lower bounds." );
-    if( !solver.data()->setUpperBound( u ) )
-      throw std::runtime_error( "Failed to set upper bounds." );
-
-    if( !solver.initSolver() )
-      throw std::runtime_error( "Failed to initialize OSQP solver." );
-
-    solver.settings()->setWarmStart( true );
-
+    // Solve the QP.
     if( solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
-    {
       throw std::runtime_error( "OSQP solver failed." );
-    }
 
-    Eigen::VectorXd solution = solver.getSolution();
-
-    for( int t = 0; t < horizon_steps; ++t )
+    // Extract the candidate controls from the solution.
+    Eigen::VectorXd   solution = solver.getSolution();
+    ControlTrajectory u_candidate( n_u, numControls );
+    for( int t = 0; t < numControls; ++t )
     {
-      controls.col( t ) = solution.segment( ( horizon_steps + 1 ) * state_dim + t * control_dim, control_dim );
+      u_candidate.col( t ) = solution.segment( numStates * n_x + t * n_u, n_u );
     }
 
-    states = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
+    // Compute the update direction (difference between candidate and current controls).
+    ControlTrajectory d_u = u_candidate - controls;
 
-    double new_cost = problem.objective_function( states, controls );
+    // Use the Armijo line search to determine the step length.
+    double alpha = backtracking_line_search( problem.initial_state, controls, d_u, problem.dynamics, problem.objective_function, problem.dt,
+                                             ls_parameters );
 
+    // Update controls with damping.
+    ControlTrajectory u_new = controls + alpha * d_u;
+
+    // Forward integrate to obtain the new state trajectory.
+    StateTrajectory new_states = integrate_horizon( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4 );
+    double          new_cost   = problem.objective_function( new_states, u_new );
+
+    // Optionally, log the step.
+    // std::cerr << "Iteration " << iter << ": cost = " << new_cost << ", step size alpha = " << alpha << std::endl;
+
+    // Check for convergence.
     if( std::abs( cost - new_cost ) < tolerance )
     {
+      controls = u_new;
+      states   = new_states;
+      cost     = new_cost;
       break;
     }
-
-    cost = new_cost;
+    else if( new_cost < cost )
+    {
+      controls = u_new;
+      states   = new_states;
+      cost     = new_cost;
+    }
+    else
+      break;
   }
 
-  SolverOutput solution_output;
-  solution_output.cost       = cost;
-  solution_output.trajectory = states;
-  solution_output.controls   = controls;
-  return solution_output;
+  SolverOutput sol;
+  sol.cost       = cost;
+  sol.trajectory = states;
+  sol.controls   = controls;
+  return sol;
 }

@@ -8,12 +8,36 @@
 #include "finite_differences.hpp"
 #include "types.hpp"
 
+inline double
+compute_trajectory_cost( const StateTrajectory& states, const ControlTrajectory& controls, const StageCostFunction& stage_cost,
+                         const TerminalCostFunction& terminal_cost )
+{
+  double    cost = 0.0;
+  const int T    = controls.cols();
+  const int Tp1  = states.cols();
+  assert( T == Tp1 - 1 && "State trajectory should have one more column than control trajectory" );
+
+  for( int t = 0; t < T; ++t )
+  {
+    cost += stage_cost( states.col( t ), controls.col( t ) );
+  }
+
+  // Assumes states has T+1 columns.
+  cost += terminal_cost( states.col( T ) );
+
+  return cost;
+}
+
 struct OCP
 {
 
   // Dynamics and Objective
-  State             initial_state;
-  MotionModel       dynamics;
+  State       initial_state;
+  MotionModel dynamics;
+
+  StageCostFunction    stage_cost;
+  TerminalCostFunction terminal_cost;
+  // objective function is sum of all stage costs + terminal cost
   ObjectiveFunction objective_function;
 
   int    control_dim   = 0;
@@ -22,10 +46,10 @@ struct OCP
   double dt;
 
   // Static bounds
-  std::optional<State>   state_lower_bounds;
-  std::optional<State>   state_upper_bounds;
-  std::optional<Control> input_lower_bounds;
-  std::optional<Control> input_upper_bounds;
+  std::optional<State>   state_lower_bounds = std::nullopt;
+  std::optional<State>   state_upper_bounds = std::nullopt;
+  std::optional<Control> input_lower_bounds = std::nullopt;
+  std::optional<Control> input_upper_bounds = std::nullopt;
 
   ConstraintsFunction equality_constraints;
   ConstraintsFunction inequality_constraints;
@@ -40,7 +64,7 @@ struct OCP
   CostCrossTerm           cost_cross_term;
 
   void
-  initialize_derivatives()
+  initialize_problem()
   {
     // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )
@@ -57,6 +81,16 @@ struct OCP
       cost_control_hessian = compute_cost_control_hessian;
     if( !cost_cross_term )
       cost_cross_term = compute_cost_cross_term;
+
+    if( !objective_function && stage_cost && terminal_cost )
+    {
+      auto stage_cost_local    = stage_cost;
+      auto terminal_cost_local = terminal_cost;
+      objective_function       = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,
+                                                                    const ControlTrajectory& controls ) -> double {
+        return compute_trajectory_cost( states, controls, stage_cost_local, terminal_cost_local );
+      };
+    }
   }
 
   // Verify that the problem's dimensions and outputs are consistent
@@ -90,6 +124,8 @@ struct OCP
     {
       assert( input_upper_bounds->size() == control_dim && "Input upper bounds size mismatch" );
     }
+    // Ensure cost functions are set
+    assert( objective_function && "Objective cost function is not set." );
 
     // Test dynamics function
     State           test_state      = State::Zero( state_dim );
@@ -98,9 +134,11 @@ struct OCP
     assert( dynamics_output.size() == state_dim && "Dynamics output size mismatch" );
 
     // Test objective function
-    StateTrajectory         test_states   = StateTrajectory::Zero( state_dim, 10 ); // Example trajectory length
-    ControlTrajectory       test_controls = ControlTrajectory::Zero( control_dim, 10 );
-    [[maybe_unused]] double cost          = objective_function( test_states, test_controls );
+    ControlTrajectory test_controls = ControlTrajectory::Zero( control_dim, 10 );
+    StateTrajectory   test_states   = integrate_horizon( test_state, test_controls, dt, dynamics, integrate_euler );
+    std::cout << "controls " << test_controls.rows() << " , " << test_controls.cols() << std::endl;
+    std::cout << "states " << test_states.rows() << " , " << test_states.cols() << std::endl;
+    double cost = objective_function( test_states, test_controls );
 
     // If constraints exist, test them
     if( inequality_constraints )

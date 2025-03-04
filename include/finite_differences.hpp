@@ -2,13 +2,28 @@
 
 #include "integrator.hpp"
 #include "types.hpp"
+#pragma once
+#include <algorithm>
+#include <functional>
 
-// Finite Differences GradientComputer
+#include <Eigen/Dense>
+
+#include "integrator.hpp"
+#include "types.hpp"
+
+//================================================================
+// Finite Differences for the Overall Trajectory Cost
+// (This computes the gradient of the full ObjectiveFunction,
+//  which in your design is typically set to a lambda wrapping
+//  compute_trajectory_cost(stage_cost, terminal_cost).)
+//================================================================
+
+// Finite Differences GradientComputer (for the full trajectory)
 inline ControlGradient
 finite_differences_gradient( const State& initial_state, const ControlTrajectory& controls, const MotionModel& dynamics,
                              const ObjectiveFunction& objective_function, double dt )
 {
-  bool            forward_only = false; // TODO take out of function
+  bool            forward_only = false; // TODO: Consider making this a parameter
   ControlGradient gradients    = ControlGradient::Zero( controls.rows(), controls.cols() );
 
   ControlTrajectory controls_minus = controls;
@@ -24,7 +39,7 @@ finite_differences_gradient( const State& initial_state, const ControlTrajectory
     {
       double epsilon = std::max( 1e-6, 1e-8 * std::abs( controls( i, t ) ) );
 
-      // Create perturbed control trajectories
+      // Perturb positively
       controls_plus                    = controls;
       controls_plus( i, t )           += epsilon;
       StateTrajectory trajectory_plus  = integrate_horizon( initial_state, controls_plus, dt, dynamics, integrate_rk4 );
@@ -32,28 +47,31 @@ finite_differences_gradient( const State& initial_state, const ControlTrajectory
 
       if( !forward_only )
       {
+        // Perturb negatively
         controls_minus          = controls;
         controls_minus( i, t ) -= epsilon;
         trajectory_minus        = integrate_horizon( initial_state, controls_minus, dt, dynamics, integrate_rk4 );
         cost_minus              = objective_function( trajectory_minus, controls_minus );
       }
 
-      // Compute central difference gradient
+      // Central difference approximation (or forward if forward_only)
       gradients( i, t ) = ( cost_plus - cost_minus ) / ( forward_only ? epsilon : 2 * epsilon );
     }
   }
-
   return gradients;
 }
 
-// Compute dynamics state Jacobian using finite differences or analytical methods
+//================================================================
+// Finite Differences for the Dynamics (unchanged)
+//================================================================
+
+
 inline Eigen::MatrixXd
 compute_dynamics_state_jacobian( const MotionModel& dynamics, const State& x, const Control& u )
 {
-  Eigen::MatrixXd A;
   const int       state_dim = x.size();
   const double    epsilon   = 1e-6;
-  A                         = Eigen::MatrixXd::Zero( state_dim, state_dim );
+  Eigen::MatrixXd A         = Eigen::MatrixXd::Zero( state_dim, state_dim );
 
   for( int i = 0; i < state_dim; ++i )
   {
@@ -68,15 +86,13 @@ compute_dynamics_state_jacobian( const MotionModel& dynamics, const State& x, co
   return A;
 }
 
-// Compute dynamics control Jacobian using finite differences or analytical methods
 inline Eigen::MatrixXd
 compute_dynamics_control_jacobian( const MotionModel& dynamics, const State& x, const Control& u )
 {
-  Eigen::MatrixXd B;
   const int       state_dim   = x.size();
   const int       control_dim = u.size();
   const double    epsilon     = 1e-6;
-  B                           = Eigen::MatrixXd::Zero( state_dim, control_dim );
+  Eigen::MatrixXd B           = Eigen::MatrixXd::Zero( state_dim, control_dim );
 
   for( int i = 0; i < control_dim; ++i )
   {
@@ -91,130 +107,176 @@ compute_dynamics_control_jacobian( const MotionModel& dynamics, const State& x, 
   return B;
 }
 
-// Compute cost state gradient using finite differences or analytical methods
+//----------------------------------------------------------
+// Compute cost state gradient (first derivative wrt state)
+//----------------------------------------------------------
 inline Eigen::VectorXd
-compute_cost_state_gradient( const ObjectiveFunction& objective_function, const State& x, const Control& u )
+compute_cost_state_gradient( const StageCostFunction& stage_cost, const State& x, const Control& u )
 {
-  Eigen::VectorXd l_x;
-
-  const int    state_dim = x.size();
-  const double epsilon   = 1e-6;
-  l_x                    = Eigen::VectorXd::Zero( state_dim );
-
-  for( int i = 0; i < state_dim; ++i )
+  Eigen::VectorXd grad    = Eigen::VectorXd::Zero( x.size() );
+  const double    epsilon = 1e-6;
+  for( int i = 0; i < x.size(); ++i )
   {
-    State dx = State::Zero( state_dim );
-    dx( i )  = epsilon;
-
-    double cost_plus  = objective_function( x + dx, u );
-    double cost_minus = objective_function( x - dx, u );
-
-    l_x( i ) = ( cost_plus - cost_minus ) / ( 2 * epsilon );
+    State dx       = State::Zero( x.size() );
+    dx( i )        = epsilon;
+    double f_plus  = stage_cost( x + dx, u );
+    double f_minus = stage_cost( x - dx, u );
+    grad( i )      = ( f_plus - f_minus ) / ( 2 * epsilon );
   }
-  return l_x;
+  return grad;
 }
 
-// Compute cost control gradient using finite differences or analytical methods
+//----------------------------------------------------------
+// Compute cost control gradient (first derivative wrt control)
+//----------------------------------------------------------
 inline Eigen::VectorXd
-compute_cost_control_gradient( const ObjectiveFunction& objective_function, const State& x, const Control& u )
+compute_cost_control_gradient( const StageCostFunction& stage_cost, const State& x, const Control& u )
 {
-  Eigen::VectorXd l_u;
-  const int       control_dim = u.size();
-  const double    epsilon     = 1e-6;
-  l_u                         = Eigen::VectorXd::Zero( control_dim );
-
-  for( int i = 0; i < control_dim; ++i )
+  Eigen::VectorXd grad    = Eigen::VectorXd::Zero( u.size() );
+  const double    epsilon = 1e-6;
+  for( int i = 0; i < u.size(); ++i )
   {
-    Control du = Control::Zero( control_dim );
-    du( i )    = epsilon;
-
-    double cost_plus  = objective_function( x, u + du );
-    double cost_minus = objective_function( x, u - du );
-
-    l_u( i ) = ( cost_plus - cost_minus ) / ( 2 * epsilon );
+    Control du     = Control::Zero( u.size() );
+    du( i )        = epsilon;
+    double f_plus  = stage_cost( x, u + du );
+    double f_minus = stage_cost( x, u - du );
+    grad( i )      = ( f_plus - f_minus ) / ( 2 * epsilon );
   }
-  return l_u;
+  return grad;
 }
 
-// Compute cost state Hessian using finite differences or analytical methods
-inline Eigen::MatrixXd
-compute_cost_state_hessian( const ObjectiveFunction& objective_function, const State& x, const Control& u )
+//------------------------------------------------------------------------------
+// Helper function: safe_eval
+// Calls the stage_cost function and checks if the returned value is finite.
+// If not, it prints a warning and returns 0.0 as a fallback.
+//------------------------------------------------------------------------------
+inline double
+safe_eval( const StageCostFunction& stage_cost, const State& x, const Control& u )
 {
-  Eigen::MatrixXd l_xx;
-
-  const int    state_dim = x.size();
-  const double epsilon   = 1e-6;
-  l_xx                   = Eigen::MatrixXd::Zero( state_dim, state_dim );
-
-  for( int i = 0; i < state_dim; ++i )
+  double value = stage_cost( x, u );
+  if( !std::isfinite( value ) )
   {
-    for( int j = 0; j < state_dim; ++j )
-    {
-      State dx1 = State::Zero( state_dim );
-      State dx2 = State::Zero( state_dim );
-      dx1( i )  = epsilon;
-      dx2( j )  = epsilon;
-
-      double cost_plus  = objective_function( x + dx1 + dx2, u );
-      double cost_minus = objective_function( x + dx1 - dx2, u );
-
-      l_xx( i, j ) = ( cost_plus - cost_minus ) / ( 4 * epsilon * epsilon );
-    }
+    return 0.0;
   }
-  return l_xx;
+  return value;
 }
 
-// Compute cost control Hessian using finite differences or analytical methods
+//------------------------------------------------------------------------------
+// Compute cost state Hessian (second derivative wrt state)
+//------------------------------------------------------------------------------
 inline Eigen::MatrixXd
-compute_cost_control_hessian( const ObjectiveFunction& objective_function, const State& x, const Control& u )
+compute_cost_state_hessian( const StageCostFunction& stage_cost, const State& x, const Control& u )
 {
-  Eigen::MatrixXd l_uu;
-  const int       control_dim = u.size();
-  const double    epsilon     = 1e-6;
-  l_uu                        = Eigen::MatrixXd::Zero( control_dim, control_dim );
+  const int       n       = x.size();
+  Eigen::MatrixXd H       = Eigen::MatrixXd::Zero( n, n );
+  const double    epsilon = 1e-5; // Slightly larger for second derivatives
 
-  for( int i = 0; i < control_dim; ++i )
+  // Diagonal entries using the standard second-order central difference:
+  for( int i = 0; i < n; ++i )
   {
-    for( int j = 0; j < control_dim; ++j )
+    State dx       = State::Zero( n );
+    dx( i )        = epsilon;
+    double f_plus  = safe_eval( stage_cost, x + dx, u );
+    double f       = safe_eval( stage_cost, x, u );
+    double f_minus = safe_eval( stage_cost, x - dx, u );
+    // If any value is not finite (shouldn't happen because of safe_eval), we get 0.
+    H( i, i ) = ( f_plus - 2 * f + f_minus ) / ( epsilon * epsilon );
+  }
+
+  // Off-diagonal entries using a four-point formula:
+  for( int i = 0; i < n; ++i )
+  {
+    for( int j = 0; j < n; ++j )
     {
-      Control du1 = Control::Zero( control_dim );
-      Control du2 = Control::Zero( control_dim );
-      du1( i )    = epsilon;
-      du2( j )    = epsilon;
-
-      double cost_plus  = objective_function( x, u + du1 + du2 );
-      double cost_minus = objective_function( x, u + du1 - du2 );
-
-      l_uu( i, j ) = ( cost_plus - cost_minus ) / ( 4 * epsilon * epsilon );
+      if( i != j )
+      {
+        State dx_i  = State::Zero( n );
+        State dx_j  = State::Zero( n );
+        dx_i( i )   = epsilon;
+        dx_j( j )   = epsilon;
+        double f_pp = safe_eval( stage_cost, x + dx_i + dx_j, u );
+        double f_pm = safe_eval( stage_cost, x + dx_i - dx_j, u );
+        double f_mp = safe_eval( stage_cost, x - dx_i + dx_j, u );
+        double f_mm = safe_eval( stage_cost, x - dx_i - dx_j, u );
+        H( i, j )   = ( f_pp - f_pm - f_mp + f_mm ) / ( 4 * epsilon * epsilon );
+      }
     }
   }
-  return l_uu;
+
+  return H;
 }
 
-// Compute cost cross term Hessian using finite differences or analytical methods
+//------------------------------------------------------------------------------
+// Compute cost control Hessian (second derivative wrt control)
+//------------------------------------------------------------------------------
 inline Eigen::MatrixXd
-compute_cost_cross_term( const ObjectiveFunction& objective_function, const State& x, const Control& u )
+compute_cost_control_hessian( const StageCostFunction& stage_cost, const State& x, const Control& u )
 {
-  Eigen::MatrixXd l_ux;
-  const int       state_dim   = x.size();
-  const int       control_dim = u.size();
-  const double    epsilon     = 1e-6;
-  l_ux                        = Eigen::MatrixXd::Zero( control_dim, state_dim );
+  const int       m       = u.size();
+  Eigen::MatrixXd H       = Eigen::MatrixXd::Zero( m, m );
+  const double    epsilon = 1e-5;
 
-  for( int i = 0; i < control_dim; ++i )
+  // Diagonal entries using the standard second-order central difference:
+  for( int i = 0; i < m; ++i )
   {
-    for( int j = 0; j < state_dim; ++j )
+    Control du     = Control::Zero( m );
+    du( i )        = epsilon;
+    double f_plus  = safe_eval( stage_cost, x, u + du );
+    double f       = safe_eval( stage_cost, x, u );
+    double f_minus = safe_eval( stage_cost, x, u - du );
+    H( i, i )      = ( f_plus - 2 * f + f_minus ) / ( epsilon * epsilon );
+  }
+
+  // Off-diagonal entries using a four-point formula:
+  for( int i = 0; i < m; ++i )
+  {
+    for( int j = 0; j < m; ++j )
     {
-      Control du = Control::Zero( control_dim );
-      State   dx = State::Zero( state_dim );
-      du( i )    = epsilon;
-      dx( j )    = epsilon;
-
-      double cost_plus  = objective_function( x + dx, u + du );
-      double cost_minus = objective_function( x - dx, u + du );
-
-      l_ux( i, j ) = ( cost_plus - cost_minus ) / ( 4 * epsilon * epsilon );
+      if( i != j )
+      {
+        Control du_i = Control::Zero( m );
+        Control du_j = Control::Zero( m );
+        du_i( i )    = epsilon;
+        du_j( j )    = epsilon;
+        double f_pp  = safe_eval( stage_cost, x, u + du_i + du_j );
+        double f_pm  = safe_eval( stage_cost, x, u + du_i - du_j );
+        double f_mp  = safe_eval( stage_cost, x, u - du_i + du_j );
+        double f_mm  = safe_eval( stage_cost, x, u - du_i - du_j );
+        H( i, j )    = ( f_pp - f_pm - f_mp + f_mm ) / ( 4 * epsilon * epsilon );
+      }
     }
   }
-  return l_ux;
+
+  return H;
+}
+
+//------------------------------------------------------------------------------
+// Compute cost cross term Hessian (mixed derivative: control vs. state)
+//------------------------------------------------------------------------------
+inline Eigen::MatrixXd
+compute_cost_cross_term( const StageCostFunction& stage_cost, const State& x, const Control& u )
+{
+  const int       m       = u.size();
+  const int       n       = x.size();
+  Eigen::MatrixXd H       = Eigen::MatrixXd::Zero( m, n );
+  const double    epsilon = 1e-6; // Use 1e-6; adjust if needed
+
+  // Use a four-point formula for mixed derivatives.
+  for( int i = 0; i < m; ++i )
+  {
+    for( int j = 0; j < n; ++j )
+    {
+      Control du  = Control::Zero( m );
+      State   dx  = State::Zero( n );
+      du( i )     = epsilon;
+      dx( j )     = epsilon;
+      double f_pp = safe_eval( stage_cost, x + dx, u + du );
+      double f_pm = safe_eval( stage_cost, x - dx, u + du );
+      double f_mp = safe_eval( stage_cost, x + dx, u - du );
+      double f_mm = safe_eval( stage_cost, x - dx, u - du );
+      H( i, j )   = ( f_pp - f_pm - f_mp + f_mm ) / ( 4 * epsilon * epsilon );
+    }
+  }
+
+  return H;
 }

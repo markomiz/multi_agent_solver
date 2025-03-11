@@ -107,7 +107,7 @@ multi_agent_lqr_example()
   // Solve the global OCP using the iLQR solver.
   // (You could also try OSQP or constrained GD if desired.)
   SolverOutput global_ilqr_solution = ilqr_solver( global_ocp, 100, 1e-5 );
-  // SolverOutput global_sqp_solution  = osqp_solver( global_ocp, 100, 1e-5 );
+  SolverOutput global_sqp_solution  = osqp_solver( global_ocp, 100, 1e-5 );
 
 
   // Extract individual agent solutions.

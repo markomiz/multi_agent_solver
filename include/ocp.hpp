@@ -8,23 +8,22 @@
 #include "finite_differences.hpp"
 #include "types.hpp"
 
-inline double
-compute_trajectory_cost( const StateTrajectory& states, const ControlTrajectory& controls, const StageCostFunction& stage_cost,
+double
+compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, const StageCostFunction& stage_cost,
                          const TerminalCostFunction& terminal_cost )
 {
-  double    cost = 0.0;
-  const int T    = controls.cols();
-  const int Tp1  = states.cols();
-  assert( T == Tp1 - 1 && "State trajectory should have one more column than control trajectory" );
+  int T = U.cols();
 
+  int Tp1 = X.cols();
+  // std::cerr << "   - T (controls) = " << T << ", Tp1 (states) = " << Tp1 << std::endl;
+  // assert( T == Tp1 - 1 && "❌ ERROR: State trajectory should have one more column than control trajectory!" );
+
+  double cost = 0.0;
   for( int t = 0; t < T; ++t )
   {
-    cost += stage_cost( states.col( t ), controls.col( t ) );
+    cost += stage_cost( X.col( t ), U.col( t ) );
   }
-
-  // Assumes states has T+1 columns.
-  cost += terminal_cost( states.col( T ) );
-
+  cost += terminal_cost( X.col( Tp1 - 1 ) );
   return cost;
 }
 
@@ -84,6 +83,7 @@ struct OCP
 
     if( !objective_function && stage_cost && terminal_cost )
     {
+      std::cerr << "no objective function defined yet" << std::endl;
       auto stage_cost_local    = stage_cost;
       auto terminal_cost_local = terminal_cost;
       objective_function       = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,

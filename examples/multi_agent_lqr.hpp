@@ -99,16 +99,20 @@ multi_agent_lqr_example()
   // Create the global OCP by aggregating all agent OCPs.
   OCP global_ocp = aggregator.create_global_ocp();
 
+  std::cerr << "GLOBAL OCP SUCCESSFULLY CREATED" << std::endl;
+
+  assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
+
 
   // Solve the global OCP using the iLQR solver.
   // (You could also try OSQP or constrained GD if desired.)
   SolverOutput global_ilqr_solution = ilqr_solver( global_ocp, 100, 1e-5 );
-  SolverOutput global_sqp_solution  = osqp_solver( global_ocp, 100, 1e-5 );
+  // SolverOutput global_sqp_solution  = osqp_solver( global_ocp, 100, 1e-5 );
 
 
   // Extract individual agent solutions.
   std::unordered_map<size_t, SolverOutput> ilqr_agent_solutions = aggregator.extract_solutions( global_ilqr_solution );
-  std::unordered_map<size_t, SolverOutput> osqp_agent_solutions = aggregator.extract_solutions( global_sqp_solution );
+  // std::unordered_map<size_t, SolverOutput> osqp_agent_solutions = aggregator.extract_solutions( global_sqp_solution );
 
 
   std::cout << "Multi-agent LQR results:" << std::endl;
@@ -116,13 +120,13 @@ multi_agent_lqr_example()
   {
     std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
   }
-  std::cout << "Multi-agent OSQP results:" << std::endl;
-  for( const auto& [agent_id, sol] : osqp_agent_solutions )
-  {
-    std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
-  }
+  // std::cout << "Multi-agent OSQP results:" << std::endl;
+  // for( const auto& [agent_id, sol] : osqp_agent_solutions )
+  // {
+  //   std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
+  // }
 
   // Also, print the global cost.
   std::cout << "Global cost ilqr: " << global_ilqr_solution.cost << std::endl;
-  std::cout << "Global cost osqp: " << global_sqp_solution.cost << std::endl;
+  // std::cout << "Global cost osqp: " << global_sqp_solution.cost << std::endl;
 }

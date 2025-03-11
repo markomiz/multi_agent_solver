@@ -76,6 +76,7 @@ public:
     std::cerr << "initialize_problem" << std::endl;
     global_ocp.verify_problem();
     std::cerr << "verify_problem" << std::endl;
+    assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
 
     return global_ocp;
   }
@@ -168,21 +169,17 @@ private:
   void
   setup_objective_function( OCP& global_ocp ) const
   {
-    global_ocp.objective_function = [this]( const StateTrajectory& full_x, const ControlTrajectory& full_u ) {
+    global_ocp.stage_cost = [this]( const State& full_x, const Control& full_u ) -> double {
       double total_cost = 0.0;
 
       if( !use_only_global_cost_and_constraints )
       {
         for( const auto& block : agent_blocks )
         {
-          StateTrajectory   x_agent( block.state_dim, full_x.cols() );
-          ControlTrajectory u_agent( block.control_dim, full_u.cols() );
-          for( int t = 0; t < full_x.cols(); ++t )
-          {
-            x_agent.col( t ) = full_x.block( block.state_offset, t, block.state_dim, 1 );
-            u_agent.col( t ) = full_u.block( block.control_offset, t, block.control_dim, 1 );
-          }
-          total_cost += block.ocp_ptr->objective_function( x_agent, u_agent );
+          State   x_agent = full_x.segment( block.state_offset, block.state_dim );
+          Control u_agent = full_u.segment( block.control_offset, block.control_dim );
+
+          total_cost += block.ocp_ptr->stage_cost( x_agent, u_agent );
         }
       }
 
@@ -190,6 +187,22 @@ private:
       {
         total_cost += ( *cross_agent_cost )( full_x, full_u );
       }
+
+      return total_cost;
+    };
+
+    global_ocp.terminal_cost = [this]( const State& full_x ) -> double {
+      double total_cost = 0.0;
+
+      if( !use_only_global_cost_and_constraints )
+      {
+        for( const auto& block : agent_blocks )
+        {
+          State x_agent  = full_x.segment( block.state_offset, block.state_dim );
+          total_cost    += block.ocp_ptr->terminal_cost( x_agent );
+        }
+      }
+
       return total_cost;
     };
   }

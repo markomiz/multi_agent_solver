@@ -61,11 +61,16 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
       const Eigen::MatrixXd B = problem.dynamics_control_jacobian( problem.dynamics, x.col( t ), u.col( t ) );
 
       // Cost derivatives wrt x, u
-      const Eigen::VectorXd l_x  = problem.cost_state_gradient( problem.objective_function, x.col( t ), u.col( t ) );
-      const Eigen::VectorXd l_u  = problem.cost_control_gradient( problem.objective_function, x.col( t ), u.col( t ) );
+      const Eigen::VectorXd l_x = problem.cost_state_gradient( problem.objective_function, x.col( t ), u.col( t ) );
+
+      const Eigen::VectorXd l_u = problem.cost_control_gradient( problem.objective_function, x.col( t ), u.col( t ) );
+
       const Eigen::MatrixXd l_xx = problem.cost_state_hessian( problem.objective_function, x.col( t ), u.col( t ) );
+
       const Eigen::MatrixXd l_uu = problem.cost_control_hessian( problem.objective_function, x.col( t ), u.col( t ) );
+
       const Eigen::MatrixXd l_ux = problem.cost_cross_term( problem.objective_function, x.col( t ), u.col( t ) );
+
 
       Eigen::VectorXd Q_x  = l_x + A.transpose() * V_x;
       Eigen::VectorXd Q_u  = l_u + B.transpose() * V_x;

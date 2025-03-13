@@ -10,6 +10,7 @@
 #include "multi_agent_aggregator.hpp"
 #include "ocp.hpp"
 #include "solver_output.hpp"
+#include "solvers/constrained_gradient_descent.hpp"
 #include "solvers/ilqr.hpp"
 #include "solvers/osqp_solver.hpp"
 #include "types.hpp"
@@ -79,11 +80,14 @@ multi_agent_lqr_example()
 
   // first test individual agent
   OCP          agent_ocp           = create_linear_lqr_ocp( state_dim, control_dim, dt, horizon_steps );
-  SolverOutput agent_solution      = ilqr_solver( agent_ocp, 100, 1e-5 );
+  SolverOutput ilqr_agent_solution = ilqr_solver( agent_ocp, 100, 1e-5 );
   SolverOutput osqp_agent_solution = osqp_solver( agent_ocp, 100, 1e-5 );
+  SolverOutput cgd_agent_solution  = constrained_gradient_descent_solver( agent_ocp, 100, 1e-5 );
 
-  std::cout << "Single-agent LQR cost: " << agent_solution.cost << std::endl;
-  std::cout << "Single-agent OSQP cost: " << agent_solution.cost << std::endl;
+
+  std::cout << "Single-agent LQR cost: " << ilqr_agent_solution.cost << std::endl;
+  std::cout << "Single-agent OSQP cost: " << osqp_agent_solution.cost << std::endl;
+  std::cout << "Single-agent CDG cost: " << cgd_agent_solution.cost << std::endl;
 
 
   // Create an aggregator for multi-agent problems.
@@ -112,11 +116,13 @@ multi_agent_lqr_example()
   // (You could also try OSQP or constrained GD if desired.)
   SolverOutput global_ilqr_solution = ilqr_solver( global_ocp, 100, 1e-5 );
   SolverOutput global_sqp_solution  = osqp_solver( global_ocp, 100, 1e-5 );
+  SolverOutput global_cgd_solution  = constrained_gradient_descent_solver( global_ocp, 100, 1e-5 );
 
 
   // Extract individual agent solutions.
   std::unordered_map<size_t, SolverOutput> ilqr_agent_solutions = aggregator.extract_solutions( global_ilqr_solution );
   std::unordered_map<size_t, SolverOutput> osqp_agent_solutions = aggregator.extract_solutions( global_sqp_solution );
+  std::unordered_map<size_t, SolverOutput> cgd_agent_solutions  = aggregator.extract_solutions( global_cgd_solution );
 
 
   std::cout << "Multi-agent LQR results:" << std::endl;
@@ -129,8 +135,14 @@ multi_agent_lqr_example()
   {
     std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
   }
+  std::cout << "Multi-agent CGD results:" << std::endl;
+  for( const auto& [agent_id, sol] : cgd_agent_solutions )
+  {
+    std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
+  }
 
   // Also, print the global cost.
   std::cout << "Global cost ilqr: " << global_ilqr_solution.cost << std::endl;
   std::cout << "Global cost osqp: " << global_sqp_solution.cost << std::endl;
+  std::cout << "Global cost cgd: " << global_cgd_solution.cost << std::endl;
 }

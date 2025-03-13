@@ -252,29 +252,31 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
   double cost = problem.objective_function( states, controls );
 
   // Create OSQP solver instance.
-  OsqpEigen::Solver solver;
-  double            initial_reg = 0.0;
-  QPData            qpData      = constructQPData( problem, states, controls, initial_reg );
+  std::unique_ptr<OsqpEigen::Solver> solver      = std::make_unique<OsqpEigen::Solver>();
+  double                             initial_reg = 0.0;
+  QPData                             qpData      = constructQPData( problem, states, controls, initial_reg );
 
-  solver.data()->setNumberOfVariables( qp_dim );
-  solver.data()->setNumberOfConstraints( qpData.A.rows() );
+  solver->data()->setNumberOfVariables( qp_dim );
+  solver->data()->setNumberOfConstraints( qpData.A.rows() );
 
-  if( !solver.data()->setHessianMatrix( qpData.H ) )
+  if( !solver->data()->setHessianMatrix( qpData.H ) )
     throw std::runtime_error( "Failed to set Hessian." );
-  if( !solver.data()->setGradient( qpData.gradient ) )
+  if( !solver->data()->setGradient( qpData.gradient ) )
     throw std::runtime_error( "Failed to set gradient." );
-  if( !solver.data()->setLinearConstraintsMatrix( qpData.A ) )
+  if( !solver->data()->setLinearConstraintsMatrix( qpData.A ) )
     throw std::runtime_error( "Failed to set constraint matrix." );
-  if( !solver.data()->setLowerBound( qpData.lb ) )
+  if( !solver->data()->setLowerBound( qpData.lb ) )
     throw std::runtime_error( "Failed to set lower bounds." );
-  if( !solver.data()->setUpperBound( qpData.ub ) )
+  if( !solver->data()->setUpperBound( qpData.ub ) )
     throw std::runtime_error( "Failed to set upper bounds." );
 
-  solver.settings()->setWarmStart( true );
-  solver.settings()->setVerbosity( false );
-  if( !solver.initSolver() )
-    throw std::runtime_error( "Failed to initialize OSQP solver." );
+  solver->settings()->setWarmStart( true );
+  solver->settings()->setVerbosity( false );
+  if( !solver->initSolver() )
+    throw std::runtime_error( "Failed to initialize OSQP solver->" );
 
+  if( !solver->isInitialized() )
+    throw std::runtime_error( "Failed to initialize OSQP solver->" );
   // Prepare parameters for the Armijo line search.
   std::map<std::string, double> ls_parameters = {
     { "initial_step_size",  1.0 },
@@ -293,7 +295,7 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
     for( int attempt = 0; attempt < max_attempts; ++attempt )
     {
       H_temp = construct_hessian( problem, states, controls, current_reg );
-      if( solver.updateHessianMatrix( H_temp ) )
+      if( solver->updateHessianMatrix( H_temp ) )
       {
         hessian_updated = true;
         break;
@@ -304,21 +306,22 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
       throw std::runtime_error( "Failed to update Hessian even with adaptive regularization." );
 
     qpData = constructQPData( problem, states, controls, current_reg );
-    if( !solver.updateGradient( qpData.gradient ) )
+    if( !solver->updateGradient( qpData.gradient ) )
       throw std::runtime_error( "Failed to update gradient." );
-    if( !solver.updateLinearConstraintsMatrix( qpData.A ) )
+    if( !solver->updateLinearConstraintsMatrix( qpData.A ) )
       throw std::runtime_error( "Failed to update constraint matrix." );
-    if( !solver.updateLowerBound( qpData.lb ) )
+    if( !solver->updateLowerBound( qpData.lb ) )
       throw std::runtime_error( "Failed to update lower bounds." );
-    if( !solver.updateUpperBound( qpData.ub ) )
+    if( !solver->updateUpperBound( qpData.ub ) )
       throw std::runtime_error( "Failed to update upper bounds." );
 
     // Solve the QP.
-    if( solver.solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
+    if( solver->solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
       throw std::runtime_error( "OSQP solver failed." );
 
     // Extract the candidate controls from the solution.
-    Eigen::VectorXd   solution = solver.getSolution();
+    Eigen::VectorXd solution = Eigen::VectorXd( solver->getSolution() ); // Force copy
+
     ControlTrajectory u_candidate( n_u, numControls );
     for( int t = 0; t < numControls; ++t )
     {
@@ -359,6 +362,10 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
     else
       break;
   }
+  solver->clearSolverVariables();
+  solver->clearSolver();
+
+  solver = nullptr;
 
   SolverOutput sol;
   sol.cost       = cost;

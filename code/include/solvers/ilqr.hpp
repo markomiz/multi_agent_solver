@@ -121,11 +121,7 @@ ilqr_solver( OCP& problem, int max_iterations = 100, double tolerance = 1e-6 )
         // Optional clamp
         if( problem.input_lower_bounds && problem.input_upper_bounds )
         {
-          for( int i = 0; i < n_u; ++i )
-          {
-            u_new( i, t ) = std::max( ( *problem.input_lower_bounds )( i ), u_new( i, t ) );
-            u_new( i, t ) = std::min( ( *problem.input_upper_bounds )( i ), u_new( i, t ) );
-          }
+          clamp_controls( u_new, *problem.input_lower_bounds, *problem.input_upper_bounds );
         }
 
         // Now propagate forward

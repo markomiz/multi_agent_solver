@@ -62,60 +62,12 @@ create_single_track_lane_following_ocp()
   // Terminal cost (set to zero here, can be modified if needed).
   problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
 
-  // // --- Add analytic derivatives for the cost function. ---
-  // // Gradient with respect to state.
-  // problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control& ) -> Eigen::VectorXd {
-  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
-  //   // Only Y (index 1) and vx (index 3) appear in the cost.
-  //   grad( 1 ) = 2.0 * w_lane * state( 1 );
-  //   grad( 3 ) = 2.0 * w_speed * ( state( 3 ) - desired_velocity );
-  //   return grad;
-  // };
 
-  // // Gradient with respect to control.
-  // problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control ) -> Eigen::VectorXd {
-  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
-  //   grad( 0 )            = 2.0 * w_delta * control( 0 );
-  //   grad( 1 )            = 2.0 * w_acc * control( 1 );
-  //   return grad;
-  // };
-
-  // // Hessian with respect to state.
-  // problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
-  //   H( 1, 1 )         = 2.0 * w_lane;
-  //   H( 3, 3 )         = 2.0 * w_speed;
-  //   return H;
-  // };
-
-  // // Hessian with respect to control.
-  // problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
-  //   H( 0, 0 )         = 2.0 * w_delta;
-  //   H( 1, 1 )         = 2.0 * w_acc;
-  //   return H;
-  // };
-
-  // // Cross-term Hessian (∂²l/∂u∂x). Since cost is separable, this is zero.
-  // problem.cost_cross_term = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-  //   return Eigen::MatrixXd::Zero( 2, 6 );
-  // };
-
-  // // (Optionally, you can also add analytic derivatives for the dynamics, but if your
-  // // dynamic_bicycle_model is complex, you might continue to use finite differences.)
-  // problem.dynamics_state_jacobian = []( const MotionModel& /*dyn*/, const State& x, const Control& u ) -> Eigen::MatrixXd {
-  //   return dynamic_bicycle_state_jacobian( x, u );
-  // };
-  // problem.dynamics_control_jacobian = []( const MotionModel& /*dyn*/, const State& x, const Control& u ) -> Eigen::MatrixXd {
-  //   return dynamic_bicycle_control_jacobian( x, u );
-  // };
-
-
-  // Eigen::VectorXd lower_bounds( 2 ), upper_bounds( 2 );
-  // lower_bounds << -100.0, -100.0;
-  // upper_bounds << 100.0, 100.0;
-  // problem.input_lower_bounds = lower_bounds;
-  // problem.input_upper_bounds = upper_bounds;
+  Eigen::VectorXd lower_bounds( 2 ), upper_bounds( 2 );
+  lower_bounds << -0.7, -1.0;
+  upper_bounds << 0.7, 1.0;
+  problem.input_lower_bounds = lower_bounds;
+  problem.input_upper_bounds = upper_bounds;
 
   // Initialize and verify the problem.
   problem.initialize_problem();

@@ -12,11 +12,8 @@ double
 compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, const StageCostFunction& stage_cost,
                          const TerminalCostFunction& terminal_cost )
 {
-  int T = U.cols();
-
+  int T   = U.cols();
   int Tp1 = X.cols();
-  // std::cerr << "   - T (controls) = " << T << ", Tp1 (states) = " << Tp1 << std::endl;
-  // assert( T == Tp1 - 1 && "❌ ERROR: State trajectory should have one more column than control trajectory!" );
 
   double cost = 0.0;
   for( int t = 0; t < T; ++t )
@@ -30,12 +27,18 @@ compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, c
 struct OCP
 {
 
+  // intial guess and output
+  StateTrajectory   best_states;
+  ControlTrajectory best_controls;
+  double            best_cost = std::numeric_limits<double>::max();
+
   // Dynamics and Objective
   State       initial_state;
   MotionModel dynamics;
 
   StageCostFunction    stage_cost;
   TerminalCostFunction terminal_cost;
+
   // objective function is sum of all stage costs + terminal cost
   ObjectiveFunction objective_function;
 
@@ -50,6 +53,7 @@ struct OCP
   std::optional<Control> input_lower_bounds = std::nullopt;
   std::optional<Control> input_upper_bounds = std::nullopt;
 
+  // function constraints
   ConstraintsFunction equality_constraints;
   ConstraintsFunction inequality_constraints;
 
@@ -63,8 +67,26 @@ struct OCP
   CostCrossTerm           cost_cross_term;
 
   void
+  reset()
+  {
+    best_states   = StateTrajectory::Zero( state_dim, horizon_steps + 1 );
+    best_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
+    best_cost     = std::numeric_limits<double>::max();
+  }
+
+  void
   initialize_problem()
   {
+    // Ensure best_states and best_controls have correct sizes
+    if( best_states.rows() != state_dim || best_states.cols() != horizon_steps + 1 )
+    {
+      best_states = StateTrajectory::Zero( state_dim, horizon_steps + 1 );
+    }
+    if( best_controls.rows() != control_dim || best_controls.cols() != horizon_steps )
+    {
+      best_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
+    }
+
     // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )
       dynamics_state_jacobian = compute_dynamics_state_jacobian;
@@ -104,9 +126,6 @@ struct OCP
 
     assert( initial_state.size() == state_dim && "Initial state size does not match state dimension" );
 
-    // Check initial state dimension
-    assert( initial_state.size() == state_dim && "Initial state size does not match state dimension" );
-
     // Check bounds dimensions
     if( state_lower_bounds.has_value() )
     {
@@ -128,27 +147,21 @@ struct OCP
     assert( objective_function && "Objective cost function is not set." );
 
     // Test dynamics function
-    State           test_state      = State::Zero( state_dim );
-    Control         test_control    = Control::Zero( control_dim );
-    StateDerivative dynamics_output = dynamics( test_state, test_control );
+    StateDerivative dynamics_output = dynamics( best_states.col( 0 ), best_controls.col( 0 ) );
     assert( dynamics_output.size() == state_dim && "Dynamics output size mismatch" );
 
     // Test objective function
-    ControlTrajectory test_controls = ControlTrajectory::Zero( control_dim, 10 );
-    StateTrajectory   test_states   = integrate_horizon( test_state, test_controls, dt, dynamics, integrate_euler );
-    std::cout << "controls " << test_controls.rows() << " , " << test_controls.cols() << std::endl;
-    std::cout << "states " << test_states.rows() << " , " << test_states.cols() << std::endl;
-    double cost = objective_function( test_states, test_controls );
+    double cost = objective_function( best_states, best_controls );
 
     // If constraints exist, test them
     if( inequality_constraints )
     {
-      ConstraintViolations violations = inequality_constraints( test_state, test_control );
+      ConstraintViolations violations = inequality_constraints( best_states.col( 0 ), best_controls.col( 0 ) );
       assert( violations.size() >= 0 && "Inequality constraints output invalid size" );
     }
     if( equality_constraints )
     {
-      ConstraintViolations violations = equality_constraints( test_state, test_control );
+      ConstraintViolations violations = equality_constraints( best_states.col( 0 ), best_controls.col( 0 ) );
       assert( violations.size() >= 0 && "Equality constraints output invalid size" );
     }
 
@@ -156,3 +169,5 @@ struct OCP
     return true;
   }
 };
+
+using Solver = std::function<void( OCP&, int, double )>;

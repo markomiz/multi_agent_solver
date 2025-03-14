@@ -8,7 +8,6 @@
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "types.hpp"
 
 // Helper function to compute the augmented cost

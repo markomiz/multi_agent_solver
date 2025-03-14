@@ -9,7 +9,6 @@
 #include "line_search.hpp"
 #include "ocp.hpp"
 #include "single_track_ocp.hpp"
-#include "solver_output.hpp"
 #include "solvers/constrained_gradient_descent.hpp"
 #include "solvers/gradient_descent.hpp"
 #include "solvers/ilqr.hpp"
@@ -102,39 +101,39 @@ lqr_test( bool with_derivatives )
   int    max_iterations = 100;
   double tolerance      = 1e-5; // Convergence tolerance
 
-  auto                          start_gd    = std::chrono::high_resolution_clock::now();
-  auto                          solution_gd = gradient_descent_solver( problem, max_iterations, tolerance );
-  auto                          end_gd      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_gd  = end_gd - start_gd;
+  // auto                          start_gd    = std::chrono::high_resolution_clock::now();
+  // auto                          solution_gd = gradient_descent_solver( problem, max_iterations, tolerance );
+  // auto                          end_gd      = std::chrono::high_resolution_clock::now();
+  // std::chrono::duration<double> elapsed_gd  = end_gd - start_gd;
 
-  // Run iLQR solver with timing
-  auto                          start_ilqr    = std::chrono::high_resolution_clock::now();
-  auto                          solution_ilqr = ilqr_solver( problem, max_iterations, tolerance );
-  auto                          end_ilqr      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_ilqr  = end_ilqr - start_ilqr;
+  // // Run iLQR solver with timing
+  // auto                          start_ilqr    = std::chrono::high_resolution_clock::now();
+  // auto                          solution_ilqr = ilqr_solver( problem, max_iterations, tolerance );
+  // auto                          end_ilqr      = std::chrono::high_resolution_clock::now();
+  // std::chrono::duration<double> elapsed_ilqr  = end_ilqr - start_ilqr;
 
-  auto                          start_cgd    = std::chrono::high_resolution_clock::now();
-  auto                          solution_cgd = constrained_gradient_descent_solver( problem, max_iterations, tolerance );
-  auto                          end_cgd      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_cgd  = end_cgd - start_cgd;
+  // auto                          start_cgd    = std::chrono::high_resolution_clock::now();
+  // auto                          solution_cgd = constrained_gradient_descent_solver( problem, max_iterations, tolerance );
+  // auto                          end_cgd      = std::chrono::high_resolution_clock::now();
+  // std::chrono::duration<double> elapsed_cgd  = end_cgd - start_cgd;
 
-  // Run iLQR solver with timing
-  auto                          start_osqp    = std::chrono::high_resolution_clock::now();
-  auto                          solution_osqp = osqp_solver( problem, max_iterations, tolerance );
-  auto                          end_osqp      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_osqp  = end_osqp - start_osqp;
+  // // Run iLQR solver with timing
+  // auto                          start_osqp    = std::chrono::high_resolution_clock::now();
+  // auto                          solution_osqp = osqp_solver( problem, max_iterations, tolerance );
+  // auto                          end_osqp      = std::chrono::high_resolution_clock::now();
+  // std::chrono::duration<double> elapsed_osqp  = end_osqp - start_osqp;
 
-  // Output results
-  std::cout << "iLQR cost: " << solution_ilqr.cost << std::endl;
-  std::cout << "Gradient Descent Cost: " << solution_gd.cost << std::endl;
-  std::cout << "Constrained Gradient Descent Cost: " << solution_cgd.cost << std::endl;
-  std::cout << "OSQP Cost " << solution_osqp.cost << std::endl;
+  // // Output results
+  // std::cout << "iLQR cost: " << solution_ilqr.cost << std::endl;
+  // std::cout << "Gradient Descent Cost: " << solution_gd.cost << std::endl;
+  // std::cout << "Constrained Gradient Descent Cost: " << solution_cgd.cost << std::endl;
+  // std::cout << "OSQP Cost " << solution_osqp.cost << std::endl;
 
-  std::cout << "---------------" << std::endl;
-  std::cout << "iLQR runtime: " << elapsed_ilqr.count() << " seconds" << std::endl;
-  std::cout << "Gradient Descent runtime: " << elapsed_gd.count() << " seconds" << std::endl;
-  std::cout << "CGD runtime: " << elapsed_cgd.count() << " seconds" << std::endl;
-  std::cout << "OSQP runtime: " << elapsed_osqp.count() << " seconds" << std::endl;
+  // std::cout << "---------------" << std::endl;
+  // std::cout << "iLQR runtime: " << elapsed_ilqr.count() << " seconds" << std::endl;
+  // std::cout << "Gradient Descent runtime: " << elapsed_gd.count() << " seconds" << std::endl;
+  // std::cout << "CGD runtime: " << elapsed_cgd.count() << " seconds" << std::endl;
+  // std::cout << "OSQP runtime: " << elapsed_osqp.count() << " seconds" << std::endl;
 
   std::cout << "\n---------------------------------------" << std::endl;
 }

@@ -9,9 +9,8 @@
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 
-#include "integrator.hpp"    // must provide integrate_horizon() and integrate_rk4()
-#include "ocp.hpp"           // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
-#include "solver_output.hpp" // defines SolverOutput
+#include "integrator.hpp" // must provide integrate_horizon() and integrate_rk4()
+#include "ocp.hpp"        // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
 #include <OsqpEigen/OsqpEigen.h>
 
 //====================================================================
@@ -232,8 +231,8 @@ constructQPData( const OCP &problem, const StateTrajectory &states, const Contro
 // The function returns a SolverOutput that contains the final cost,
 // state trajectory, and control trajectory.
 //
-inline SolverOutput
-osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
+inline void
+osqp_solver( OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
 {
   using namespace osqp_solver_ns;
   int T           = problem.horizon_steps;
@@ -244,12 +243,13 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
   int qp_dim      = numStates * n_x + numControls * n_u;
 
   // Initialize state and control trajectories.
-  StateTrajectory   states   = StateTrajectory::Zero( n_x, numStates );
-  ControlTrajectory controls = ControlTrajectory::Zero( n_u, numControls );
-  states.col( 0 )            = problem.initial_state;
+  StateTrajectory   &states   = problem.best_states;
+  ControlTrajectory &controls = problem.best_controls;
+  auto              &cost     = problem.best_cost;
+
   // Generate an initial trajectory (e.g. with zero controls):
-  states      = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
-  double cost = problem.objective_function( states, controls );
+  states = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
+  cost   = problem.objective_function( states, controls );
 
   // Create OSQP solver instance.
   std::unique_ptr<OsqpEigen::Solver> solver      = std::make_unique<OsqpEigen::Solver>();
@@ -364,12 +364,4 @@ osqp_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
   }
   solver->clearSolverVariables();
   solver->clearSolver();
-
-  solver = nullptr;
-
-  SolverOutput sol;
-  sol.cost       = cost;
-  sol.trajectory = states;
-  sol.controls   = controls;
-  return sol;
 }

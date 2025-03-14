@@ -9,7 +9,6 @@
 
 #include "integrator.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "types.hpp"
 
 /**
@@ -19,10 +18,9 @@
  * @param problem        The OCP containing dynamics, cost function, etc.
  * @param max_iterations Maximum iLQR iterations
  * @param tolerance      Convergence threshold on cost improvement
- * @return SolverOutput with final cost, state trajectory, and control trajectory
  */
-inline SolverOutput
-ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e-6 )
+inline void
+ilqr_solver( OCP& problem, int max_iterations = 100, double tolerance = 1e-6 )
 {
   // Extract problem dimensions
   const int    T   = problem.horizon_steps;
@@ -31,18 +29,13 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
   const double dt  = problem.dt;
 
   // Allocate state/control trajectories
-  StateTrajectory   x = StateTrajectory::Zero( n_x, T + 1 );
-  ControlTrajectory u = ControlTrajectory::Zero( n_u, T );
+  StateTrajectory&   x    = problem.best_states;
+  ControlTrajectory& u    = problem.best_controls;
+  auto&              cost = problem.best_cost;
 
-  // Initialize states from the initial condition and (zero) controls
-  x.col( 0 ) = problem.initial_state;
-  for( int t = 0; t < T; ++t )
-  {
-    u.col( t ).setZero(); // or any feasible guess you prefer
-  }
   // Forward simulate once to get initial trajectory & cost
-  x           = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
-  double cost = problem.objective_function( x, u );
+  x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
+  cost = problem.objective_function( x, u );
 
   // Storage for the backward pass
   // K[t] is an n_u x n_x matrix, k[t] is n_u x 1
@@ -171,10 +164,4 @@ ilqr_solver( const OCP &problem, int max_iterations = 100, double tolerance = 1e
       cost = best_cost;
     }
   } // end main iLQR iteration
-  // Return solution
-  SolverOutput sol;
-  sol.cost       = cost;
-  sol.trajectory = x;
-  sol.controls   = u;
-  return sol;
 }

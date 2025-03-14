@@ -6,7 +6,6 @@
 
 #include "models/dynmic_bicycle_model.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "solvers/constrained_gradient_descent.hpp"
 #include "solvers/gradient_descent.hpp"
 #include "solvers/ilqr.hpp"
@@ -35,10 +34,10 @@ create_single_track_lane_following_ocp()
   const double desired_velocity = 5.0; // [m/s]
 
   // Cost weights.
-  const double w_lane  = 0.01;  // Penalize lateral deviation.
-  const double w_speed = 0.01;  // Penalize speed error.
-  const double w_delta = 0.001; // Penalize steering.
-  const double w_acc   = 0.01;  // Penalize acceleration.
+  const double w_lane  = 1.0; // Penalize lateral deviation.
+  const double w_speed = 0.1; // Penalize speed error.
+  const double w_delta = 0.1; // Penalize steering.
+  const double w_acc   = 0.1; // Penalize acceleration.
 
   // Stage cost function.
   problem.stage_cost = [=]( const State& state, const Control& control ) -> double {
@@ -62,44 +61,44 @@ create_single_track_lane_following_ocp()
   // Terminal cost (set to zero here, can be modified if needed).
   problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
 
-  // --- Add analytic derivatives for the cost function. ---
-  // Gradient with respect to state.
-  problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control& ) -> Eigen::VectorXd {
-    Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
-    // Only Y (index 1) and vx (index 3) appear in the cost.
-    grad( 1 ) = 2.0 * w_lane * state( 1 );
-    grad( 3 ) = 2.0 * w_speed * ( state( 3 ) - desired_velocity );
-    return grad;
-  };
+  // // --- Add analytic derivatives for the cost function. ---
+  // // Gradient with respect to state.
+  // problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control& ) -> Eigen::VectorXd {
+  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
+  //   // Only Y (index 1) and vx (index 3) appear in the cost.
+  //   grad( 1 ) = 2.0 * w_lane * state( 1 );
+  //   grad( 3 ) = 2.0 * w_speed * ( state( 3 ) - desired_velocity );
+  //   return grad;
+  // };
 
-  // Gradient with respect to control.
-  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control ) -> Eigen::VectorXd {
-    Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
-    grad( 0 )            = 2.0 * w_delta * control( 0 );
-    grad( 1 )            = 2.0 * w_acc * control( 1 );
-    return grad;
-  };
+  // // Gradient with respect to control.
+  // problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control ) -> Eigen::VectorXd {
+  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
+  //   grad( 0 )            = 2.0 * w_delta * control( 0 );
+  //   grad( 1 )            = 2.0 * w_acc * control( 1 );
+  //   return grad;
+  // };
 
-  // Hessian with respect to state.
-  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
-    H( 1, 1 )         = 2.0 * w_lane;
-    H( 3, 3 )         = 2.0 * w_speed;
-    return H;
-  };
+  // // Hessian with respect to state.
+  // problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
+  //   H( 1, 1 )         = 2.0 * w_lane;
+  //   H( 3, 3 )         = 2.0 * w_speed;
+  //   return H;
+  // };
 
-  // Hessian with respect to control.
-  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
-    H( 0, 0 )         = 2.0 * w_delta;
-    H( 1, 1 )         = 2.0 * w_acc;
-    return H;
-  };
+  // // Hessian with respect to control.
+  // problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
+  //   H( 0, 0 )         = 2.0 * w_delta;
+  //   H( 1, 1 )         = 2.0 * w_acc;
+  //   return H;
+  // };
 
-  // Cross-term Hessian (∂²l/∂u∂x). Since cost is separable, this is zero.
-  problem.cost_cross_term = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-    return Eigen::MatrixXd::Zero( 2, 6 );
-  };
+  // // Cross-term Hessian (∂²l/∂u∂x). Since cost is separable, this is zero.
+  // problem.cost_cross_term = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  //   return Eigen::MatrixXd::Zero( 2, 6 );
+  // };
 
   // // (Optionally, you can also add analytic derivatives for the dynamics, but if your
   // // dynamic_bicycle_model is complex, you might continue to use finite differences.)
@@ -111,10 +110,9 @@ create_single_track_lane_following_ocp()
   // };
 
 
-  // Optionally set control bounds (commented out here).
-  // Eigen::VectorXd lower_bounds(2), upper_bounds(2);
-  // lower_bounds << -0.4, -3.0;
-  // upper_bounds <<  0.4,  3.0;
+  // Eigen::VectorXd lower_bounds( 2 ), upper_bounds( 2 );
+  // lower_bounds << -100.0, -100.0;
+  // upper_bounds << 100.0, 100.0;
   // problem.input_lower_bounds = lower_bounds;
   // problem.input_upper_bounds = upper_bounds;
 
@@ -133,38 +131,44 @@ single_track_test()
 
   // Set solver parameters.
   int    max_iterations = 100;
-  double tolerance      = 1e-5;
+  double tolerance      = 1e-7;
 
-  // Solve with various solvers.
-  auto                          start_gd    = std::chrono::high_resolution_clock::now();
-  auto                          solution_gd = gradient_descent_solver( problem, max_iterations, tolerance );
-  auto                          end_gd      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_gd  = end_gd - start_gd;
+  // // Solve with Gradient Descent (GD)
+  // auto         start_gd    = std::chrono::high_resolution_clock::now();
+  // SolverOutput solution_gd = gradient_descent_solver( problem, max_iterations, tolerance );
+  // auto         end_gd      = std::chrono::high_resolution_clock::now();
+  // double       elapsed_gd  = std::chrono::duration<double, std::milli>( end_gd - start_gd ).count();
 
-  auto                          start_ilqr    = std::chrono::high_resolution_clock::now();
-  auto                          solution_ilqr = ilqr_solver( problem, max_iterations, tolerance );
-  auto                          end_ilqr      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_ilqr  = end_ilqr - start_ilqr;
+  // // Solve with iLQR
+  // auto         start_ilqr    = std::chrono::high_resolution_clock::now();
+  // SolverOutput solution_ilqr = ilqr_solver( problem, max_iterations, tolerance );
+  // auto         end_ilqr      = std::chrono::high_resolution_clock::now();
+  // double       elapsed_ilqr  = std::chrono::duration<double, std::milli>( end_ilqr - start_ilqr ).count();
 
-  auto                          start_cgd    = std::chrono::high_resolution_clock::now();
-  auto                          solution_cgd = constrained_gradient_descent_solver( problem, max_iterations, tolerance );
-  auto                          end_cgd      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_cgd  = end_cgd - start_cgd;
+  // // Solve with Constrained Gradient Descent (CGD)
+  // auto         start_cgd    = std::chrono::high_resolution_clock::now();
+  // SolverOutput solution_cgd = constrained_gradient_descent_solver( problem, max_iterations, tolerance );
+  // auto         end_cgd      = std::chrono::high_resolution_clock::now();
+  // double       elapsed_cgd  = std::chrono::duration<double, std::milli>( end_cgd - start_cgd ).count();
 
-  auto                          start_osqp    = std::chrono::high_resolution_clock::now();
-  auto                          solution_osqp = osqp_solver( problem, max_iterations, tolerance );
-  auto                          end_osqp      = std::chrono::high_resolution_clock::now();
-  std::chrono::duration<double> elapsed_osqp  = end_osqp - start_osqp;
+  // // Solve with OSQP
+  // auto         start_osqp    = std::chrono::high_resolution_clock::now();
+  // SolverOutput solution_osqp = osqp_solver( problem, max_iterations, tolerance );
+  // auto         end_osqp      = std::chrono::high_resolution_clock::now();
+  // double       elapsed_osqp  = std::chrono::duration<double, std::milli>( end_osqp - start_osqp ).count();
 
-  std::cerr << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
-  // Print results.
-  std::cout << "Single-track iLQR cost: " << solution_ilqr.cost << "\n"
-            << "Single-track Gradient Descent cost: " << solution_gd.cost << "\n"
-            << "Single-track Constrained GD cost: " << solution_cgd.cost << "\n"
-            << "Single-track OSQP cost: " << solution_osqp.cost << "\n";
+  // // Print structured results
+  // std::cerr << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
+  // std::cout << "🚗 Single-Track Lane Following Test 🚗\n";
+  // std::cout << "-----------------------------------\n";
 
-  std::cout << "iLQR time: " << elapsed_ilqr.count() << " s\n";
-  std::cout << "GD time: " << elapsed_gd.count() << " s\n";
-  std::cout << "CGD time: " << elapsed_cgd.count() << " s\n";
-  std::cout << "OSQP time: " << elapsed_osqp.count() << " s\n";
+  // std::cout << "🔹 Single-track iLQR cost: " << solution_ilqr.cost << "  | Time: " << elapsed_ilqr << " ms\n";
+
+  // std::cout << "🔹 Single-track Gradient Descent cost: " << solution_gd.cost << "  | Time: " << elapsed_gd << " ms\n";
+
+  // std::cout << "🔹 Single-track Constrained GD cost: " << solution_cgd.cost << "  | Time: " << elapsed_cgd << " ms\n";
+
+  // std::cout << "🔹 Single-track OSQP cost: " << solution_osqp.cost << "  | Time: " << elapsed_osqp << " ms\n";
+
+  std::cout << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
 }

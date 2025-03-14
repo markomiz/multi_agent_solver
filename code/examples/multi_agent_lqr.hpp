@@ -9,7 +9,6 @@
 
 #include "multi_agent_aggregator.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "solvers/constrained_gradient_descent.hpp"
 #include "solvers/ilqr.hpp"
 #include "solvers/osqp_solver.hpp"
@@ -69,9 +68,6 @@ create_linear_lqr_ocp( int state_dim, int control_dim, double dt, int horizon_st
 // This example uses the MultiAgentAggregator class to create a global OCP,
 // solves it using the iLQR solver, and then extracts per-agent solutions.
 //---------------------------------------------------------------------
-#include <chrono>
-#include <iostream>
-#include <unordered_map>
 
 void
 multi_agent_lqr_example()
@@ -81,28 +77,6 @@ multi_agent_lqr_example()
   const int    control_dim   = 4;
   const double dt            = 0.1;
   const int    horizon_steps = 10;
-
-  // First test individual agent
-  OCP agent_ocp = create_linear_lqr_ocp( state_dim, control_dim, dt, horizon_steps );
-
-  auto         start               = std::chrono::high_resolution_clock::now();
-  SolverOutput ilqr_agent_solution = ilqr_solver( agent_ocp, 100, 1e-5 );
-  auto         end                 = std::chrono::high_resolution_clock::now();
-  double       ilqr_time           = std::chrono::duration<double, std::milli>( end - start ).count();
-
-  start                            = std::chrono::high_resolution_clock::now();
-  SolverOutput osqp_agent_solution = osqp_solver( agent_ocp, 100, 1e-5 );
-  end                              = std::chrono::high_resolution_clock::now();
-  double osqp_time                 = std::chrono::duration<double, std::milli>( end - start ).count();
-
-  start                           = std::chrono::high_resolution_clock::now();
-  SolverOutput cgd_agent_solution = constrained_gradient_descent_solver( agent_ocp, 100, 1e-5 );
-  end                             = std::chrono::high_resolution_clock::now();
-  double cgd_time                 = std::chrono::duration<double, std::milli>( end - start ).count();
-
-  std::cout << "Single-agent LQR cost: " << ilqr_agent_solution.cost << " (Time: " << ilqr_time << " ms)" << std::endl;
-  std::cout << "Single-agent OSQP cost: " << osqp_agent_solution.cost << " (Time: " << osqp_time << " ms)" << std::endl;
-  std::cout << "Single-agent CGD cost: " << cgd_agent_solution.cost << " (Time: " << cgd_time << " ms)" << std::endl;
 
   // Create an aggregator for multi-agent problems
   MultiAgentAggregator aggregator;
@@ -117,51 +91,44 @@ multi_agent_lqr_example()
   // Compute offsets for multi-agent system
   aggregator.compute_offsets();
 
-  // Create global OCP
-  OCP global_ocp = aggregator.create_global_ocp();
+  // Solve in centralized mode
+  auto   start                 = std::chrono::high_resolution_clock::now();
+  double central_ilqr_cost     = aggregator.solve_centralized( ilqr_solver, 100, 1e-5 );
+  auto   end                   = std::chrono::high_resolution_clock::now();
+  double centralized_ilqr_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  std::cerr << "GLOBAL OCP SUCCESSFULLY CREATED" << std::endl;
-  assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
+  start                        = std::chrono::high_resolution_clock::now();
+  double central_osqp_cost     = aggregator.solve_centralized( osqp_solver, 100, 1e-5 );
+  end                          = std::chrono::high_resolution_clock::now();
+  double centralized_osqp_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  // Solve the global OCP using different solvers
-  start                             = std::chrono::high_resolution_clock::now();
-  SolverOutput global_ilqr_solution = ilqr_solver( global_ocp, 100, 1e-5 );
-  end                               = std::chrono::high_resolution_clock::now();
-  double global_ilqr_time           = std::chrono::duration<double, std::milli>( end - start ).count();
+  start                       = std::chrono::high_resolution_clock::now();
+  double central_cgd_cost     = aggregator.solve_centralized( constrained_gradient_descent_solver, 100, 1e-5 );
+  end                         = std::chrono::high_resolution_clock::now();
+  double centralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  start                            = std::chrono::high_resolution_clock::now();
-  SolverOutput global_sqp_solution = osqp_solver( global_ocp, 100, 1e-5 );
-  end                              = std::chrono::high_resolution_clock::now();
-  double global_sqp_time           = std::chrono::duration<double, std::milli>( end - start ).count();
+  // Solve in decentralized mode
+  start                          = std::chrono::high_resolution_clock::now();
+  double decentral_ilqr_cost     = aggregator.solve_decentralized( ilqr_solver, 10, 10, 1e-5 );
+  end                            = std::chrono::high_resolution_clock::now();
+  double decentralized_ilqr_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  start                            = std::chrono::high_resolution_clock::now();
-  SolverOutput global_cgd_solution = constrained_gradient_descent_solver( global_ocp, 100, 1e-5 );
-  end                              = std::chrono::high_resolution_clock::now();
-  double global_cgd_time           = std::chrono::duration<double, std::milli>( end - start ).count();
+  start                          = std::chrono::high_resolution_clock::now();
+  double decentral_osqp_cost     = aggregator.solve_decentralized( osqp_solver, 10, 10, 1e-5 );
+  end                            = std::chrono::high_resolution_clock::now();
+  double decentralized_osqp_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  // Extract individual agent solutions
-  std::unordered_map<size_t, SolverOutput> ilqr_agent_solutions = aggregator.extract_solutions( global_ilqr_solution );
-  std::unordered_map<size_t, SolverOutput> osqp_agent_solutions = aggregator.extract_solutions( global_sqp_solution );
-  std::unordered_map<size_t, SolverOutput> cgd_agent_solutions  = aggregator.extract_solutions( global_cgd_solution );
+  start                         = std::chrono::high_resolution_clock::now();
+  double decentral_cgd_cost     = aggregator.solve_decentralized( constrained_gradient_descent_solver, 10, 10, 1e-5 );
+  end                           = std::chrono::high_resolution_clock::now();
+  double decentralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
 
-  std::cout << "Multi-agent LQR results:" << std::endl;
-  for( const auto& [agent_id, sol] : ilqr_agent_solutions )
-  {
-    std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
-  }
-  std::cout << "Multi-agent OSQP results:" << std::endl;
-  for( const auto& [agent_id, sol] : osqp_agent_solutions )
-  {
-    std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
-  }
-  std::cout << "Multi-agent CGD results:" << std::endl;
-  for( const auto& [agent_id, sol] : cgd_agent_solutions )
-  {
-    std::cout << "Agent " << agent_id << " cost: " << sol.cost << std::endl;
-  }
+  // Print results
+  std::cout << "Centralized iLQR time: " << centralized_ilqr_time << " ms  |   cost : " << central_ilqr_cost << std::endl;
+  std::cout << "Centralized OSQP time: " << centralized_osqp_time << " ms  |   cost : " << central_osqp_cost << std::endl;
+  std::cout << "Centralized CGD time: " << centralized_cgd_time << " ms  |   cost : " << central_cgd_cost << std::endl;
 
-  // Print global costs and solver execution times
-  std::cout << "Global cost ilqr: " << global_ilqr_solution.cost << " (Time: " << global_ilqr_time << " ms)" << std::endl;
-  std::cout << "Global cost osqp: " << global_sqp_solution.cost << " (Time: " << global_sqp_time << " ms)" << std::endl;
-  std::cout << "Global cost cgd: " << global_cgd_solution.cost << " (Time: " << global_cgd_time << " ms)" << std::endl;
+  std::cout << "Decentralized iLQR time: " << decentralized_ilqr_time << " ms  |   cost : " << decentral_ilqr_cost << std::endl;
+  std::cout << "Decentralized OSQP time: " << decentralized_osqp_time << " ms  |   cost : " << decentral_osqp_cost << std::endl;
+  std::cout << "Decentralized CGD time: " << decentralized_cgd_time << " ms  |   cost : " << decentral_cgd_cost << std::endl;
 }

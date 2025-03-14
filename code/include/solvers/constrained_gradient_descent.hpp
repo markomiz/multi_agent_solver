@@ -9,13 +9,11 @@
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "types.hpp"
 
-SolverOutput
-constrained_gradient_descent_solver( const OCP& problem, int max_iterations, double tolerance )
+void
+constrained_gradient_descent_solver( OCP& problem, int max_iterations, double tolerance )
 {
-  SolverOutput output;
 
   // Initialize Lagrange multipliers and penalty parameter
   ConstraintViolations equality_multipliers   = problem.equality_constraints
@@ -29,14 +27,13 @@ constrained_gradient_descent_solver( const OCP& problem, int max_iterations, dou
   double               penalty_parameter      = 1.0;
 
   // Initialize control trajectory
-  output.controls        = ControlTrajectory::Zero( problem.control_dim, problem.horizon_steps );
-  auto& controls         = output.controls;
-  auto& state_trajectory = output.trajectory;
+  auto& controls         = problem.best_controls;
+  auto& state_trajectory = problem.best_states;
+  auto& cost             = problem.best_cost;
 
   // Integrate the initial state trajectory and compute the initial cost
   state_trajectory = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
-  output.cost      = compute_augmented_cost( problem, equality_multipliers, inequality_multipliers, penalty_parameter, state_trajectory,
-                                             controls );
+  cost = compute_augmented_cost( problem, equality_multipliers, inequality_multipliers, penalty_parameter, state_trajectory, controls );
 
   for( int iter = 0; iter < max_iterations; ++iter )
   {
@@ -59,32 +56,26 @@ constrained_gradient_descent_solver( const OCP& problem, int max_iterations, dou
     // Integrate trajectory with trial controls
     StateTrajectory trial_trajectory = integrate_horizon( problem.initial_state, trial_controls, problem.dt, problem.dynamics,
                                                           integrate_rk4 );
+
     double trial_cost = compute_augmented_cost( problem, equality_multipliers, inequality_multipliers, penalty_parameter, trial_trajectory,
                                                 trial_controls );
 
     // Update solution only if cost improves
-    double old_cost = output.cost;
-    if( trial_cost < output.cost )
+    double old_cost = cost;
+    if( trial_cost < cost )
     {
       controls         = trial_controls;
       state_trajectory = trial_trajectory;
-      output.cost      = trial_cost;
+      cost             = trial_cost;
     }
 
     // Update multipliers and penalty parameter across the entire horizon
     update_lagrange_multipliers( problem, state_trajectory, controls, equality_multipliers, inequality_multipliers, penalty_parameter );
     increase_penalty_parameter( penalty_parameter, problem, state_trajectory, controls, tolerance );
-
-    // std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm()
-    //           << ", Step Size: " << step_size << ", Penalty Parameter: " << penalty_parameter << std::endl;
-
     // Check for convergence
     if( std::abs( old_cost - trial_cost ) < tolerance )
     {
       break;
     }
   }
-
-  output.trajectory = state_trajectory;
-  return output;
 }

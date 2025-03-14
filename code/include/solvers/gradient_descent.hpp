@@ -8,21 +8,18 @@
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
-#include "solver_output.hpp"
 #include "types.hpp"
 
-inline SolverOutput
-gradient_descent_solver( const OCP& problem, int max_iterations, double tolerance )
+inline void
+gradient_descent_solver( OCP& problem, int max_iterations, double tolerance )
 {
-  SolverOutput output;
-  // Initialize control trajectory
-  output.controls        = ControlTrajectory::Zero( problem.control_dim, problem.horizon_steps );
-  auto& controls         = output.controls;
-  auto& state_trajectory = output.trajectory;
+  auto& controls         = problem.best_controls;
+  auto& state_trajectory = problem.best_states;
+  auto& cost             = problem.best_cost;
 
   // Integrate the initial state trajectory and compute the initial cost
   state_trajectory = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
-  output.cost      = problem.objective_function( state_trajectory, controls );
+  cost             = problem.objective_function( state_trajectory, controls );
 
   for( int iter = 0; iter < max_iterations; ++iter )
   {
@@ -47,16 +44,13 @@ gradient_descent_solver( const OCP& problem, int max_iterations, double toleranc
     double          trial_cost       = problem.objective_function( trial_trajectory, trial_controls );
 
     // Update solution only if cost improves
-    double old_cost = output.cost;
-    if( trial_cost < output.cost )
+    double old_cost = cost;
+    if( trial_cost < cost )
     {
       controls         = trial_controls;
       state_trajectory = trial_trajectory;
-      output.cost      = trial_cost;
+      cost             = trial_cost;
     }
-    // std::cout << "Iteration " << iter << ", Cost: " << output.cost << ", Gradient Norm: " << gradients.norm() << "  step size " <<
-    // step_size
-    //           << std::endl;
 
 
     // Check for convergence based on cost improvement
@@ -65,7 +59,4 @@ gradient_descent_solver( const OCP& problem, int max_iterations, double toleranc
       break;
     }
   }
-
-  output.trajectory = state_trajectory;
-  return output;
 }

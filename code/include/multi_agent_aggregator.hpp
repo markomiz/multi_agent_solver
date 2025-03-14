@@ -81,32 +81,44 @@ public:
     return global_ocp;
   }
 
-  std::unordered_map<size_t, SolverOutput>
+  double
   solve_centralized( const Solver& solver, int max_iterations, double tolerance )
   {
     if( agent_blocks.empty() )
       compute_offsets();
 
-    OCP          global_ocp      = create_global_ocp();
-    SolverOutput global_solution = solver( global_ocp, max_iterations, tolerance );
-    return extract_solutions( global_solution );
-  }
+    OCP global_ocp = create_global_ocp();
+    solver( global_ocp, max_iterations, tolerance );
 
-  std::unordered_map<size_t, SolverOutput>
-  extract_solutions( const SolverOutput& global_solution ) const
-  {
-    std::unordered_map<size_t, SolverOutput> result;
-    int                                      agent_count = static_cast<int>( agent_blocks.size() );
-
+    // Update individual agent OCPs with solved global trajectory
     for( const auto& block : agent_blocks )
     {
-      SolverOutput sol;
-      sol.cost       = global_solution.cost / double( agent_count );
-      sol.controls   = global_solution.controls.block( block.control_offset, 0, block.control_dim, global_solution.controls.cols() );
-      sol.trajectory = global_solution.trajectory.block( block.state_offset, 0, block.state_dim, global_solution.trajectory.cols() );
-      result[block.agent_id] = sol;
+      block.ocp_ptr->best_states   = global_ocp.best_states.block( block.state_offset, 0, block.state_dim, global_ocp.best_states.cols() );
+      block.ocp_ptr->best_controls = global_ocp.best_controls.block( block.control_offset, 0, block.control_dim,
+                                                                     global_ocp.best_controls.cols() );
+
+      block.ocp_ptr->best_cost = global_ocp.best_cost / agent_blocks.size();
     }
-    return result;
+    return global_ocp.best_cost;
+  }
+
+  double
+  solve_decentralized( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  {
+    double total_cost = 0;
+    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
+    {
+      for( auto& block : agent_blocks )
+      {
+        // Solve for each agent individually using the current predictions of other agents
+        solver( *block.ocp_ptr, max_inner_iterations, tolerance );
+      }
+    }
+    for( auto& block : agent_blocks )
+    {
+      total_cost += ( *block.ocp_ptr ).best_cost;
+    }
+    return total_cost;
   }
 
 private:

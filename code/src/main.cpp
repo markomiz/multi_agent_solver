@@ -21,5 +21,6 @@ main( int /*num_arguments*/, char** /*arguments*/ )
 {
   single_track_test();
   multi_agent_lqr_example();
+
   return 0;
 }

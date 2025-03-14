@@ -1,5 +1,7 @@
 #pragma once
 
+#include <omp.h>
+
 #include <cassert>
 #include <functional>
 #include <memory>
@@ -108,17 +110,26 @@ public:
     double total_cost = 0;
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
-      for( auto& block : agent_blocks )
+#pragma omp parallel for
+      for( size_t i = 0; i < agent_blocks.size(); ++i )
       {
-        // Solve for each agent individually using the current predictions of other agents
-        solver( *block.ocp_ptr, max_inner_iterations, tolerance );
+        solver( *agent_blocks[i].ocp_ptr, max_inner_iterations, tolerance );
       }
     }
     for( auto& block : agent_blocks )
     {
-      total_cost += ( *block.ocp_ptr ).best_cost;
+      total_cost += block.ocp_ptr->best_cost;
     }
     return total_cost;
+  }
+
+  void
+  reset()
+  {
+    for( auto& block : agent_blocks )
+    {
+      ( *block.ocp_ptr ).reset();
+    }
   }
 
 private:

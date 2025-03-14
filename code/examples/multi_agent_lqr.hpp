@@ -72,7 +72,7 @@ create_linear_lqr_ocp( int state_dim, int control_dim, double dt, int horizon_st
 void
 multi_agent_lqr_example()
 {
-  const int    num_agents    = 4;
+  const int    num_agents    = 10;
   const int    state_dim     = 4;
   const int    control_dim   = 4;
   const double dt            = 0.1;
@@ -96,32 +96,38 @@ multi_agent_lqr_example()
   double central_ilqr_cost     = aggregator.solve_centralized( ilqr_solver, 100, 1e-5 );
   auto   end                   = std::chrono::high_resolution_clock::now();
   double centralized_ilqr_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   start                        = std::chrono::high_resolution_clock::now();
   double central_osqp_cost     = aggregator.solve_centralized( osqp_solver, 100, 1e-5 );
   end                          = std::chrono::high_resolution_clock::now();
   double centralized_osqp_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   start                       = std::chrono::high_resolution_clock::now();
   double central_cgd_cost     = aggregator.solve_centralized( constrained_gradient_descent_solver, 100, 1e-5 );
   end                         = std::chrono::high_resolution_clock::now();
   double centralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   // Solve in decentralized mode
   start                          = std::chrono::high_resolution_clock::now();
   double decentral_ilqr_cost     = aggregator.solve_decentralized( ilqr_solver, 10, 10, 1e-5 );
   end                            = std::chrono::high_resolution_clock::now();
   double decentralized_ilqr_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   start                          = std::chrono::high_resolution_clock::now();
   double decentral_osqp_cost     = aggregator.solve_decentralized( osqp_solver, 10, 10, 1e-5 );
   end                            = std::chrono::high_resolution_clock::now();
   double decentralized_osqp_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   start                         = std::chrono::high_resolution_clock::now();
   double decentral_cgd_cost     = aggregator.solve_decentralized( constrained_gradient_descent_solver, 10, 10, 1e-5 );
   end                           = std::chrono::high_resolution_clock::now();
   double decentralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
+  aggregator.reset();
 
   // Print results
   std::cout << "Centralized iLQR time: " << centralized_ilqr_time << " ms  |   cost : " << central_ilqr_cost << std::endl;

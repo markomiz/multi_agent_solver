@@ -105,7 +105,6 @@ struct OCP
 
     if( !objective_function && stage_cost && terminal_cost )
     {
-      std::cerr << "no objective function defined yet" << std::endl;
       auto stage_cost_local    = stage_cost;
       auto terminal_cost_local = terminal_cost;
       objective_function       = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,
@@ -165,7 +164,6 @@ struct OCP
       assert( violations.size() >= 0 && "Equality constraints output invalid size" );
     }
 
-    std::cout << "OCP problem verified successfully." << std::endl;
     return true;
   }
 };

@@ -75,9 +75,7 @@ public:
     setup_inequality_constraints( global_ocp );
 
     global_ocp.initialize_problem();
-    std::cerr << "initialize_problem" << std::endl;
     global_ocp.verify_problem();
-    std::cerr << "verify_problem" << std::endl;
     assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
 
     return global_ocp;
@@ -107,19 +105,88 @@ public:
   double
   solve_decentralized( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
   {
-    double total_cost = 0;
+    double total_cost = std::numeric_limits<double>::max();
+
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
+      // Backup current best states and controls
+      std::vector<ControlTrajectory> prev_controls;
+      prev_controls.reserve( agent_blocks.size() );
+
+      for( auto& block : agent_blocks )
+      {
+        prev_controls.push_back( block.ocp_ptr->best_controls );
+      }
+      std::vector<ControlTrajectory> new_controls = prev_controls;
+
+
+      // Run local optimization per agent
 #pragma omp parallel for
       for( size_t i = 0; i < agent_blocks.size(); ++i )
       {
         solver( *agent_blocks[i].ocp_ptr, max_inner_iterations, tolerance );
+        new_controls[i] = agent_blocks[i].ocp_ptr->best_controls;
+      }
+
+      // Compute trial cost with full update
+      double trial_cost = 0;
+      for( auto& block : agent_blocks )
+      {
+        trial_cost += block.ocp_ptr->best_cost;
+      }
+
+      // Perform a line search
+      double alpha      = 1.0; // Start with full step
+      double best_alpha = alpha;
+      double best_cost  = total_cost;
+
+      while( alpha > 0.0001 ) // Reduce step size if needed
+      {
+        // Blend between previous and new states
+        for( size_t i = 0; i < agent_blocks.size(); ++i )
+        {
+          auto& ocp         = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls = alpha * new_controls[i] + ( 1 - alpha ) * prev_controls[i];
+          ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+        }
+
+        // Recompute global cost
+        double new_cost = 0;
+        for( auto& block : agent_blocks )
+        {
+          new_cost += block.ocp_ptr->best_cost;
+        }
+
+        // If the step improves the cost, accept it
+        if( new_cost < best_cost )
+        {
+          best_alpha = alpha;
+          best_cost  = new_cost;
+          break;
+        }
+
+        alpha *= 0.5; // Reduce step size
+      }
+
+      // Apply the best alpha found
+      for( size_t i = 0; i < agent_blocks.size(); ++i )
+      {
+        auto& ocp         = *agent_blocks[i].ocp_ptr;
+        ocp.best_controls = alpha * new_controls[i] + ( 1 - alpha ) * prev_controls[i];
+        ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+      }
+
+      // If the cost doesn't improve, terminate early
+      if( total_cost > best_cost + tolerance )
+      {
+        total_cost = best_cost;
+      }
+      else
+      {
+        break;
       }
     }
-    for( auto& block : agent_blocks )
-    {
-      total_cost += block.ocp_ptr->best_cost;
-    }
+
     return total_cost;
   }
 

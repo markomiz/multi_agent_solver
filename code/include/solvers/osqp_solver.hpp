@@ -64,7 +64,7 @@ construct_hessian( const OCP &problem, const StateTrajectory &states, const Cont
     {
       int    idx   = t * n_x + i;
       double diag  = Q( i, i );
-      double value = std::max( diag, 0.0 ) + reg;
+      double value = std::max( diag, 1e-6 ); // Ensure positive definiteness
       triplets.push_back( Eigen::Triplet<double>( idx, idx, value ) );
     }
   }
@@ -77,7 +77,7 @@ construct_hessian( const OCP &problem, const StateTrajectory &states, const Cont
     {
       int    idx   = ( T + 1 ) * n_x + t * n_u + i;
       double diag  = R( i, i );
-      double value = std::max( diag, 0.0 ) + reg;
+      double value = std::max( diag, 1e-6 ); // Ensure positive definiteness
       triplets.push_back( Eigen::Triplet<double>( idx, idx, value ) );
     }
   }
@@ -106,10 +106,7 @@ construct_gradient( const OCP &problem, const StateTrajectory &states, const Con
   for( int t = 0; t < T + 1; ++t )
   {
     Eigen::VectorXd g;
-    if( t == T )
-      g = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
-    else
-      g = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
+    g                         = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
     q.segment( t * n_x, n_x ) = g;
   }
   // Control gradients:
@@ -132,65 +129,146 @@ construct_gradient( const OCP &problem, const StateTrajectory &states, const Con
 inline Eigen::SparseMatrix<double>
 construct_constraints( const OCP &problem, const StateTrajectory &states, const ControlTrajectory &controls )
 {
-  int n_x             = problem.state_dim;
-  int n_u             = problem.control_dim;
-  int T               = problem.horizon_steps;
-  int num_constraints = T * n_x;
-  int qp_dim          = ( T + 1 ) * n_x + T * n_u;
+  int n_x = problem.state_dim;
+  int n_u = problem.control_dim;
+  int T   = problem.horizon_steps;
+
+  int num_dyn_constraints = T * n_x;         // Dynamics constraints: (T * n_x)
+  int num_state_bounds    = ( T + 1 ) * n_x; // State constraints: (T+1 * n_x)
+  int num_control_bounds  = T * n_u;         // Control constraints: (T * n_u)
+  int num_constraints     = num_dyn_constraints + num_state_bounds + num_control_bounds;
+
+  int qp_dim = ( T + 1 ) * n_x + T * n_u; // Total QP decision variable size
 
   std::vector<Eigen::Triplet<double>> triplets;
-  // Reserve an estimated number of nonzeros.
-  triplets.reserve( T * ( n_x + n_x * n_x + n_x * n_u ) );
+  triplets.reserve( num_constraints * ( n_x + n_u ) ); // Estimated size
 
+  // ==============================
+  // 1️⃣ Dynamics Constraints: x_{t+1} - A_t*x_t - B_t*u_t = 0
+  // ==============================
   for( int t = 0; t < T; ++t )
   {
     int row_offset = t * n_x;
-    // For x_{t+1}: coefficient +I.
+
+    // For x_{t+1}: coefficient +I
     for( int i = 0; i < n_x; ++i )
     {
       int col = ( t + 1 ) * n_x + i;
       triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, 1.0 ) );
     }
-    // For x_t: coefficient -A_t.
-    Eigen::MatrixXd A_mat = problem.dynamics_state_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
+
+    // For x_t: coefficient -A_t
+    Eigen::MatrixXd A_t = problem.dynamics_state_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
     for( int i = 0; i < n_x; ++i )
     {
       for( int j = 0; j < n_x; ++j )
       {
         int col = t * n_x + j;
-        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -A_mat( i, j ) ) );
+        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -A_t( i, j ) ) );
       }
     }
-    // For u_t: coefficient -B_t.
-    Eigen::MatrixXd B_mat = problem.dynamics_control_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
+
+    // For u_t: coefficient -B_t
+    Eigen::MatrixXd B_t = problem.dynamics_control_jacobian( problem.dynamics, states.col( t ), controls.col( t ) );
     for( int i = 0; i < n_x; ++i )
     {
       for( int j = 0; j < n_u; ++j )
       {
         int col = ( T + 1 ) * n_x + t * n_u + j;
-        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -B_mat( i, j ) ) );
+        triplets.push_back( Eigen::Triplet<double>( row_offset + i, col, -B_t( i, j ) ) );
       }
     }
   }
 
+  // ==============================
+  // 2️⃣ State Bound Constraints: x_min ≤ x_t ≤ x_max
+  // ==============================
+  int state_bound_offset = num_dyn_constraints;
+  for( int t = 0; t < ( T + 1 ); ++t )
+  {
+    for( int i = 0; i < n_x; ++i )
+    {
+      int row = state_bound_offset + t * n_x + i;
+      int col = t * n_x + i;
+      triplets.push_back( Eigen::Triplet<double>( row, col, 1.0 ) ); // x ≤ x_max
+    }
+  }
+
+  // ==============================
+  // 3️⃣ Control Bound Constraints: u_min ≤ u_t ≤ u_max
+  // ==============================
+  int control_bound_offset = num_dyn_constraints + num_state_bounds;
+  for( int t = 0; t < T; ++t )
+  {
+    for( int i = 0; i < n_u; ++i )
+    {
+      int row = control_bound_offset + t * n_u + i;
+      int col = ( T + 1 ) * n_x + t * n_u + i;
+      triplets.push_back( Eigen::Triplet<double>( row, col, 1.0 ) ); // u ≤ u_max
+    }
+  }
+
+  // ==============================
+  // Construct Sparse Constraint Matrix
+  // ==============================
   Eigen::SparseMatrix<double> A( num_constraints, qp_dim );
   A.setFromTriplets( triplets.begin(), triplets.end() );
+
   return A;
 }
 
-//---------------------------------------------------------------------
-// construct_bounds:
-// For the dynamics constraints, the equality is enforced by setting
-// l = u = 0. (If there is a constant offset c, it would appear here.)
-//---------------------------------------------------------------------
 inline std::pair<Eigen::VectorXd, Eigen::VectorXd>
 construct_bounds( const OCP &problem )
 {
-  int             n_x             = problem.state_dim;
-  int             T               = problem.horizon_steps;
-  int             num_constraints = T * n_x;
-  Eigen::VectorXd lb              = Eigen::VectorXd::Zero( num_constraints );
-  Eigen::VectorXd ub              = Eigen::VectorXd::Zero( num_constraints );
+  int n_x = problem.state_dim;
+  int n_u = problem.control_dim;
+  int T   = problem.horizon_steps;
+
+  int num_dyn_constraints = T * n_x;         // Dynamics constraints
+  int num_state_bounds    = ( T + 1 ) * n_x; // State constraints
+  int num_control_bounds  = T * n_u;         // Control constraints
+  int num_constraints     = num_dyn_constraints + num_state_bounds + num_control_bounds;
+
+  Eigen::VectorXd lb = Eigen::VectorXd::Zero( num_constraints );
+  Eigen::VectorXd ub = Eigen::VectorXd::Zero( num_constraints );
+
+  // ==============================
+  // 1️⃣ Dynamics Constraints: Enforce x_{t+1} = A_t x_t + B_t u_t
+  // ==============================
+  for( int i = 0; i < num_dyn_constraints; ++i )
+  {
+    lb( i ) = 0.0;
+    ub( i ) = 0.0;
+  }
+
+  // ==============================
+  // 2️⃣ State Bound Constraints: x_min ≤ x_t ≤ x_max
+  // ==============================
+  int state_bound_offset = num_dyn_constraints;
+  for( int t = 0; t < ( T + 1 ); ++t )
+  {
+    for( int i = 0; i < n_x; ++i )
+    {
+      int idx   = state_bound_offset + t * n_x + i;
+      lb( idx ) = problem.state_lower_bounds ? ( *problem.state_lower_bounds )( i ) : -OsqpEigen::INFTY;
+      ub( idx ) = problem.state_upper_bounds ? ( *problem.state_upper_bounds )( i ) : OsqpEigen::INFTY;
+    }
+  }
+
+  // ==============================
+  // 3️⃣ Control Bound Constraints: u_min ≤ u_t ≤ u_max
+  // ==============================
+  int control_bound_offset = num_dyn_constraints + num_state_bounds;
+  for( int t = 0; t < T; ++t )
+  {
+    for( int i = 0; i < n_u; ++i )
+    {
+      int idx   = control_bound_offset + t * n_u + i;
+      lb( idx ) = problem.input_lower_bounds ? ( *problem.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
+      ub( idx ) = problem.input_upper_bounds ? ( *problem.input_upper_bounds )( i ) : OsqpEigen::INFTY;
+    }
+  }
+
   return { lb, ub };
 }
 
@@ -272,6 +350,10 @@ osqp_solver( OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
 
   solver->settings()->setWarmStart( true );
   solver->settings()->setVerbosity( false );
+  solver->settings()->setAdaptiveRho( true );
+  solver->settings()->setMaxIteration( 1000 );
+
+
   if( !solver->initSolver() )
     throw std::runtime_error( "Failed to initialize OSQP solver->" );
 
@@ -329,21 +411,18 @@ osqp_solver( OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
     }
 
     // Compute the update direction (difference between candidate and current controls).
-    ControlTrajectory d_u = u_candidate - controls;
+    ControlTrajectory d_u = controls - u_candidate;
 
     // Use the Armijo line search to determine the step length.
-    double alpha = backtracking_line_search( problem.initial_state, controls, d_u, problem.dynamics, problem.objective_function, problem.dt,
-                                             ls_parameters );
+    double alpha = armijo_line_search( problem.initial_state, controls, d_u, problem.dynamics, problem.objective_function, problem.dt,
+                                       ls_parameters );
 
     // Update controls with damping.
-    ControlTrajectory u_new = controls + alpha * d_u;
+    ControlTrajectory u_new = controls - alpha * d_u;
 
     // Forward integrate to obtain the new state trajectory.
     StateTrajectory new_states = integrate_horizon( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4 );
     double          new_cost   = problem.objective_function( new_states, u_new );
-
-    // Optionally, log the step.
-    // std::cerr << "Iteration " << iter << ": cost = " << new_cost << ", step size alpha = " << alpha << std::endl;
 
     // Check for convergence.
     if( std::abs( cost - new_cost ) < tolerance )

@@ -36,7 +36,7 @@ create_single_track_lane_following_ocp()
 
   // Cost weights.
   const double w_lane  = 1.0; // Penalize lateral deviation.
-  const double w_speed = 0.1; // Penalize speed error.
+  const double w_speed = 1.0; // Penalize speed error.
   const double w_delta = 0.1; // Penalize steering.
   const double w_acc   = 0.1; // Penalize acceleration.
 

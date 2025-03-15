@@ -8,6 +8,7 @@
 #include "line_search.hpp"
 #include "lqr.hpp"
 #include "multi_agent_lqr.hpp"
+#include "multi_agent_single_track.hpp"
 #include "ocp.hpp"
 #include "single_track_ocp.hpp"
 #include "solvers/constrained_gradient_descent.hpp"
@@ -21,6 +22,7 @@ main( int /*num_arguments*/, char** /*arguments*/ )
 {
   single_track_test();
   multi_agent_lqr_example();
+  // multi_agent_circular_test( 10 );
 
   return 0;
 }

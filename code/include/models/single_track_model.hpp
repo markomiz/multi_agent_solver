@@ -20,12 +20,8 @@
 StateDerivative
 single_track_model( const State& x, const Control& u )
 {
-  // Unpack states
-  double X   = x( 0 );
-  double Y   = x( 1 );
   double psi = x( 2 );
   double v   = x( 3 );
-  double t   = x( 4 ); // Time
 
   // Unpack controls
   double delta = u( 0 );

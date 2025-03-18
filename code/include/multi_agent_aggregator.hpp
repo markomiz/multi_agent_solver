@@ -84,6 +84,8 @@ public:
   double
   solve_centralized( const Solver& solver, int max_iterations, double tolerance )
   {
+    std::cerr << "\n\nSolving Centralized..." << std::endl;
+
     if( agent_blocks.empty() )
       compute_offsets();
 
@@ -103,26 +105,80 @@ public:
   }
 
   double
-  solve_decentralized( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  agent_cost_sum()
+  {
+    // Compute total new cost
+    double new_total_cost = 0;
+    for( const auto& block : agent_blocks )
+    {
+      new_total_cost += block.ocp_ptr->best_cost;
+    }
+    return new_total_cost;
+  }
+
+  void
+  solve_all_agents( const Solver& solver, int max_iterations, double tolerance )
+  {
+    // Run local optimization per agent
+    // #pragma omp parallel for
+    for( size_t i = 0; i < agent_blocks.size(); ++i )
+    {
+      solver( *agent_blocks[i].ocp_ptr, max_iterations, tolerance );
+    }
+  }
+
+  double
+  solve_decentralized_simple( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
   {
     double total_cost = std::numeric_limits<double>::max();
+    std::cerr << "\nSolving decentralized Simple..." << std::endl;
+
+    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
+    {
+
+      solve_all_agents( solver, max_inner_iterations, tolerance );
+      double new_total_cost = agent_cost_sum();
+
+      // If the cost doesn't improve, terminate early
+      if( total_cost > new_total_cost + tolerance )
+      {
+        total_cost = new_total_cost;
+      }
+      else
+      {
+        std::cerr << "Early termination at outer iteration " << outer_iter << std::endl;
+        break;
+      }
+    }
+
+    return total_cost;
+  }
+
+  double
+  solve_decentralized_trust_region( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  {
+    double total_cost = std::numeric_limits<double>::max();
+    std::cerr << "\nSolving decentralized with trust region..." << std::endl;
+
+    size_t              num_agents = agent_blocks.size();
+    std::vector<double> delta( num_agents, 5.0 ); // Start with a large trust region
+    const double        eta1 = 0.01, eta2 = 0.6;  // More lenient acceptance thresholds
+    const double        shrink_factor = 0.8, expand_factor = 1.5;
+    const double        min_delta = 1e-4, max_delta = 5.0;
 
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
       // Backup current best states and controls
-      std::vector<ControlTrajectory> prev_controls;
-      prev_controls.reserve( agent_blocks.size() );
-
-      for( auto& block : agent_blocks )
+      std::vector<ControlTrajectory> prev_controls( num_agents );
+      std::vector<ControlTrajectory> new_controls( num_agents );
+      for( size_t i = 0; i < num_agents; ++i )
       {
-        prev_controls.push_back( block.ocp_ptr->best_controls );
+        prev_controls[i] = agent_blocks[i].ocp_ptr->best_controls;
       }
-      std::vector<ControlTrajectory> new_controls = prev_controls;
-
 
       // Run local optimization per agent
 #pragma omp parallel for
-      for( size_t i = 0; i < agent_blocks.size(); ++i )
+      for( size_t i = 0; i < num_agents; ++i )
       {
         solver( *agent_blocks[i].ocp_ptr, max_inner_iterations, tolerance );
         new_controls[i] = agent_blocks[i].ocp_ptr->best_controls;
@@ -135,29 +191,167 @@ public:
         trial_cost += block.ocp_ptr->best_cost;
       }
 
-      // Perform a line search
-      double alpha      = 1.0; // Start with full step
+      // Compute control deltas
+      std::vector<ControlTrajectory> control_deltas( num_agents );
+      for( size_t i = 0; i < num_agents; ++i )
+      {
+        control_deltas[i] = new_controls[i] - prev_controls[i];
+      }
+
+      // Perform trust-region updates
+      double                         best_cost     = total_cost;
+      std::vector<ControlTrajectory> best_controls = prev_controls;
+      std::vector<double>            agent_rho( num_agents, -1.0 );
+
+      for( size_t i = 0; i < num_agents; ++i )
+      {
+        double alpha             = delta[i]; // Start with the current trust-region size
+        double best_alpha        = alpha;
+        double agent_cost_before = total_cost;
+
+        while( alpha > min_delta )
+        {
+          // Compute blended control update
+          ControlTrajectory blended_control = prev_controls[i] + alpha * control_deltas[i];
+
+          // Update agent's control and recompute trajectory
+          auto& ocp         = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls = blended_control;
+          ocp.best_states   = integrate_horizon( ocp.initial_state, blended_control, ocp.dt, ocp.dynamics, integrate_rk4 );
+
+          // Compute new cost
+          double new_cost = 0;
+          for( auto& block : agent_blocks )
+          {
+            new_cost += block.ocp_ptr->best_cost;
+          }
+
+          // Compute actual vs predicted improvement
+          double predicted_improvement = -( control_deltas[i].squaredNorm() ); // Quadratic approximation
+          double actual_improvement    = total_cost - new_cost;
+          double rho                   = actual_improvement / predicted_improvement;
+          agent_rho[i]                 = rho; // Store for later adjustments
+          // Adjust step size based on trust-region acceptance criteria
+          if( rho > eta2 )
+          {
+            // Good improvement, expand trust region
+            delta[i]         = std::min( max_delta, delta[i] * expand_factor );
+            best_controls[i] = blended_control;
+            best_alpha       = alpha;
+            best_cost        = new_cost;
+            break;
+          }
+          else if( rho > eta1 )
+          {
+            // Moderate improvement, accept update but do not change trust region
+            best_controls[i] = blended_control;
+            best_alpha       = alpha;
+            best_cost        = new_cost;
+            break;
+          }
+          else
+          {
+            // Poor improvement, shrink trust region and retry
+            alpha *= shrink_factor;
+          }
+        }
+
+        // If cost increased, shrink delta even more aggressively
+        if( best_cost > agent_cost_before )
+        {
+          delta[i] *= 0.5;
+        }
+      }
+
+      // Apply best found updates
+      for( size_t i = 0; i < num_agents; ++i )
+      {
+        auto& ocp         = *agent_blocks[i].ocp_ptr;
+        ocp.best_controls = best_controls[i];
+        ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+      }
+
+      // If overall cost worsened, revert back
+      double total_new_cost = 0;
+      for( auto& block : agent_blocks )
+      {
+        total_new_cost += block.ocp_ptr->best_cost;
+      }
+
+      if( total_new_cost > total_cost + tolerance )
+      {
+        std::cerr << "Global cost worsened! Reverting step..." << std::endl;
+        for( size_t i = 0; i < num_agents; ++i )
+        {
+          auto& ocp         = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls = prev_controls[i];
+          ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+        }
+      }
+      else
+      {
+        total_cost = total_new_cost;
+      }
+
+      // If no significant improvement, stop
+      if( total_cost > best_cost - tolerance )
+      {
+        std::cerr << outer_iter << " outer iterations reached" << std::endl;
+        break;
+      }
+    }
+
+    return total_cost;
+  }
+
+  double
+  solve_decentralized( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  {
+    double total_cost = std::numeric_limits<double>::max();
+    std::cerr << "\nSolving decentralized..." << std::endl;
+
+    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
+    {
+      // Backup current best controls
+      std::vector<ControlTrajectory> prev_controls( agent_blocks.size() );
+      std::vector<ControlTrajectory> new_controls( agent_blocks.size() );
+      std::vector<ControlTrajectory> control_delta( agent_blocks.size() );
+
+
+      for( size_t i = 0; i < agent_blocks.size(); ++i )
+      {
+        prev_controls[i] = agent_blocks[i].ocp_ptr->best_controls;
+      }
+      new_controls = prev_controls;
+
+      solve_all_agents( solver, max_inner_iterations, tolerance );
+
+      for( size_t i = 0; i < agent_blocks.size(); ++i )
+      {
+        new_controls[i] = agent_blocks[i].ocp_ptr->best_controls;
+      }
+
+      // Compute per-agent control deltas
+      for( size_t i = 0; i < agent_blocks.size(); ++i )
+      {
+        control_delta[i] = new_controls[i] - prev_controls[i];
+      }
+
+      double alpha      = 1.0;
       double best_alpha = alpha;
       double best_cost  = total_cost;
 
-      while( alpha > 0.0001 ) // Reduce step size if needed
+      while( alpha > 1e-6 )
       {
-        // Blend between previous and new states
+        double new_cost = 0.0;
+        // Apply the best alpha found for each agent
         for( size_t i = 0; i < agent_blocks.size(); ++i )
         {
-          auto& ocp         = *agent_blocks[i].ocp_ptr;
-          ocp.best_controls = alpha * new_controls[i] + ( 1 - alpha ) * prev_controls[i];
-          ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+          auto& ocp          = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls  = prev_controls[i] + alpha * control_delta[i];
+          ocp.best_states    = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+          new_cost          += ocp.objective_function( ocp.best_states, ocp.best_controls );
         }
-
-        // Recompute global cost
-        double new_cost = 0;
-        for( auto& block : agent_blocks )
-        {
-          new_cost += block.ocp_ptr->best_cost;
-        }
-
-        // If the step improves the cost, accept it
         if( new_cost < best_cost )
         {
           best_alpha = alpha;
@@ -167,22 +361,26 @@ public:
 
         alpha *= 0.5; // Reduce step size
       }
-
-      // Apply the best alpha found
+      // Apply the best alpha found for each agent
       for( size_t i = 0; i < agent_blocks.size(); ++i )
       {
         auto& ocp         = *agent_blocks[i].ocp_ptr;
-        ocp.best_controls = alpha * new_controls[i] + ( 1 - alpha ) * prev_controls[i];
+        ocp.best_controls = prev_controls[i] + best_alpha * control_delta[i];
         ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+        ocp.best_cost     = ocp.objective_function( ocp.best_states, ocp.best_controls ); // Final cost update
       }
 
+      // Compute total new cost
+      double new_total_cost = agent_cost_sum();
+
       // If the cost doesn't improve, terminate early
-      if( total_cost > best_cost + tolerance )
+      if( total_cost > new_total_cost + tolerance )
       {
-        total_cost = best_cost;
+        total_cost = new_total_cost;
       }
       else
       {
+        std::cerr << "Early termination at outer iteration " << outer_iter << std::endl;
         break;
       }
     }

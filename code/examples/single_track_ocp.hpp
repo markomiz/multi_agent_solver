@@ -21,7 +21,7 @@ create_single_track_lane_following_ocp()
   // Dimensions
   problem.state_dim     = 4;
   problem.control_dim   = 2;
-  problem.horizon_steps = 50;  // Example: 5 steps for testing.
+  problem.horizon_steps = 30;  // Example: 5 steps for testing.
   problem.dt            = 0.1; // 0.1 s per step.
 
   // Initial state: for example, X=1, Y=1, psi=1, vx=1
@@ -61,6 +61,9 @@ create_single_track_lane_following_ocp()
 
   // Terminal cost (set to zero here, can be modified if needed).
   problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
+
+  // problem.dynamics_state_jacobian   = single_track_state_jacobian;
+  // problem.dynamics_control_jacobian = single_track_control_jacobian;
 
 
   Eigen::VectorXd lower_bounds( 2 ), upper_bounds( 2 );

@@ -6,7 +6,6 @@
 #include "finite_differences.hpp"
 #include "integrator.hpp"
 #include "line_search.hpp"
-#include "lqr.hpp"
 #include "multi_agent_lqr.hpp"
 #include "multi_agent_single_track.hpp"
 #include "ocp.hpp"
@@ -22,7 +21,7 @@ main( int /*num_arguments*/, char** /*arguments*/ )
 {
   single_track_test();
   multi_agent_lqr_example();
-  // multi_agent_circular_test( 10 );
+  multi_agent_circular_test();
 
   return 0;
 }

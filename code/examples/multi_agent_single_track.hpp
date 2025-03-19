@@ -249,16 +249,16 @@ multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
       std::string cost_color = RESET;
       std::string time_color = RESET;
 
-      if( cost < 1.2 * min_cost )
+      if( cost < 0.2 * ( max_cost - min_cost ) + min_cost )
         cost_color = GREEN; // Best cost 🟩
-      else if( cost < 2 * min_cost )
+      else if( cost < 0.5 * ( max_cost - min_cost ) + min_cost )
         cost_color = YELLOW; // Mid-range 🟨
       else
         cost_color = RED; // Worst cost 🟥
 
-      if( time_ms < 2 * min_time )
+      if( std::log( time_ms ) < 0.2 * std::log( max_time - min_time ) + std::log( min_time ) )
         time_color = GREEN; // Fastest 🟩
-      else if( time_ms < 4 * min_time )
+      else if( std::log( time_ms ) < 0.5 * std::log( max_time - min_time ) + std::log( min_time ) )
         time_color = YELLOW; // Mid-range 🟨
       else
         time_color = RED; // Slowest 🟥

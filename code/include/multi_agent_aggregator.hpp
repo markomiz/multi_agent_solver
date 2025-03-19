@@ -173,9 +173,9 @@ public:
 
     size_t              num_agents = agent_blocks.size();
     std::vector<double> delta( num_agents, 1.0 ); // Initial trust region per agent
-    const double        eta1 = 0.01, eta2 = 0.6;  // Trust-region acceptance thresholds
+    const double        eta1 = 0.01, eta2 = 0.5;  // Trust-region acceptance thresholds
     const double        shrink_factor = 0.8, expand_factor = 1.5;
-    const double        min_delta = 1e-4, max_delta = 5.0;
+    const double        min_delta = 1e-3, max_delta = 1.0;
 
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
@@ -207,7 +207,7 @@ public:
 
           // Compute new total cost
           double new_cost              = agent_cost_sum();
-          double predicted_improvement = total_cost - trial_cost; // Quadratic approximation
+          double predicted_improvement = ( total_cost - trial_cost ) * alpha;
           double actual_improvement    = total_cost - new_cost;
           double rho                   = actual_improvement / predicted_improvement;
 
@@ -285,29 +285,38 @@ public:
   {
     double total_cost = std::numeric_limits<double>::max();
 
+    const double                   c1        = 1e-4; // Armijo parameter (small)
+    const double                   reduction = 0.5;  // Backtracking factor
+    const double                   min_alpha = 1e-3; // Minimum step size
+    std::vector<ControlTrajectory> blended_controls( agent_blocks.size() );
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
+      // Backup controls before optimization
       auto prev_controls = backup_controls();
       solve_all_agents( solver, max_inner_iterations, tolerance );
+
       auto new_controls   = backup_controls();
       auto control_deltas = compute_control_deltas( prev_controls, new_controls );
 
       double alpha      = 1.0;
-      double min_alpha  = 1e-5;
       double best_alpha = alpha;
       double best_cost  = total_cost;
-      double reduction  = 0.5;
+
+      // Compute initial cost and predicted improvement
+      double initial_cost          = agent_cost_sum();
+      double predicted_improvement = ( total_cost - initial_cost ) * c1;
+
 
       while( alpha > min_alpha )
       {
-        std::vector<ControlTrajectory> blended_controls( agent_blocks.size() );
+
         for( size_t i = 0; i < agent_blocks.size(); ++i )
           blended_controls[i] = prev_controls[i] + alpha * control_deltas[i];
 
         apply_control_updates( blended_controls );
         double new_cost = agent_cost_sum();
 
-        if( new_cost < best_cost )
+        if( new_cost < initial_cost + alpha * predicted_improvement ) // Armijo condition
         {
           best_alpha = alpha;
           best_cost  = new_cost;
@@ -317,8 +326,9 @@ public:
         alpha *= reduction;
       }
 
-      if( alpha * reduction < min_alpha )
-        apply_control_updates( prev_controls );
+      if( alpha < min_alpha )
+        apply_control_updates( prev_controls ); // Restore previous controls if no improvement found
+
       if( total_cost > best_cost + tolerance )
         total_cost = best_cost;
       else

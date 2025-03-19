@@ -293,10 +293,12 @@ public:
       auto control_deltas = compute_control_deltas( prev_controls, new_controls );
 
       double alpha      = 1.0;
+      double min_alpha  = 1e-5;
       double best_alpha = alpha;
       double best_cost  = total_cost;
+      double reduction  = 0.5;
 
-      while( alpha > 1e-8 )
+      while( alpha > min_alpha )
       {
         std::vector<ControlTrajectory> blended_controls( agent_blocks.size() );
         for( size_t i = 0; i < agent_blocks.size(); ++i )
@@ -312,10 +314,11 @@ public:
           break;
         }
 
-        alpha *= 0.5;
+        alpha *= reduction;
       }
 
-      apply_control_updates( prev_controls );
+      if( alpha * reduction < min_alpha )
+        apply_control_updates( prev_controls );
       if( total_cost > best_cost + tolerance )
         total_cost = best_cost;
       else

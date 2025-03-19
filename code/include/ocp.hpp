@@ -28,6 +28,9 @@ struct OCP
 {
 
   // intial guess and output
+  StateTrajectory   initial_states;
+  ControlTrajectory initial_controls;
+
   StateTrajectory   best_states;
   ControlTrajectory best_controls;
   double            best_cost = std::numeric_limits<double>::max();
@@ -66,26 +69,37 @@ struct OCP
   CostControlHessian      cost_control_hessian;
   CostCrossTerm           cost_cross_term;
 
+  size_t id = 0;
+
   void
   reset()
   {
-    best_states   = StateTrajectory::Zero( state_dim, horizon_steps + 1 );
-    best_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
-    best_cost     = std::numeric_limits<double>::max();
+    initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
+    initial_states   = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
+    best_controls    = initial_controls;
+    best_states      = initial_states;
+    best_cost        = std::numeric_limits<double>::max();
+  }
+
+  void
+  update_initial_with_best()
+  {
+    initial_controls = best_controls;
+    initial_states   = best_states;
   }
 
   void
   initialize_problem()
   {
     // Ensure best_states and best_controls have correct sizes
-    if( best_states.rows() != state_dim || best_states.cols() != horizon_steps + 1 )
+    if( initial_controls.rows() != control_dim || initial_controls.cols() != horizon_steps )
     {
-      best_states = StateTrajectory::Zero( state_dim, horizon_steps + 1 );
+      initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
     }
-    if( best_controls.rows() != control_dim || best_controls.cols() != horizon_steps )
-    {
-      best_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
-    }
+    initial_states = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
+
+    best_states   = initial_states;
+    best_controls = initial_controls;
 
     // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )

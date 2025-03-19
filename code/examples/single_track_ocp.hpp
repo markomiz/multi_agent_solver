@@ -4,11 +4,9 @@
 #include <map>
 #include <string>
 
-#include "models/dynmic_bicycle_model.hpp"
 #include "models/single_track_model.hpp"
 #include "ocp.hpp"
-#include "solvers/constrained_gradient_descent.hpp"
-#include "solvers/gradient_descent.hpp"
+#include "solvers/cgd.hpp"
 #include "solvers/ilqr.hpp"
 #include "solvers/osqp_solver.hpp"
 #include "types.hpp"
@@ -61,9 +59,47 @@ create_single_track_lane_following_ocp()
 
   // Terminal cost (set to zero here, can be modified if needed).
   problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
+  // --- Add analytic derivatives for the cost function. ---
+  // Gradient with respect to state.
+  problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control& ) -> Eigen::VectorXd {
+    Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
+    // Only Y (index 1) and vx (index 3) appear in the cost.
+    grad( 1 ) = 2.0 * w_lane * state( 1 );
+    grad( 3 ) = 2.0 * w_speed * ( state( 3 ) - desired_velocity );
+    return grad;
+  };
 
-  // problem.dynamics_state_jacobian   = single_track_state_jacobian;
-  // problem.dynamics_control_jacobian = single_track_control_jacobian;
+  // Gradient with respect to control.
+  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control ) -> Eigen::VectorXd {
+    Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
+    grad( 0 )            = 2.0 * w_delta * control( 0 );
+    grad( 1 )            = 2.0 * w_acc * control( 1 );
+    return grad;
+  };
+
+  // Hessian with respect to state.
+  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
+    H( 1, 1 )         = 2.0 * w_lane;
+    H( 3, 3 )         = 2.0 * w_speed;
+    return H;
+  };
+
+  // Hessian with respect to control.
+  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
+    H( 0, 0 )         = 2.0 * w_delta;
+    H( 1, 1 )         = 2.0 * w_acc;
+    return H;
+  };
+
+
+  problem.dynamics_state_jacobian = []( const MotionModel& /*dyn*/, const State& x, const Control& u ) -> Eigen::MatrixXd {
+    return single_track_state_jacobian( x, u );
+  };
+  problem.dynamics_control_jacobian = []( const MotionModel& /*dyn*/, const State& x, const Control& u ) -> Eigen::MatrixXd {
+    return single_track_control_jacobian( x, u );
+  };
 
 
   Eigen::VectorXd lower_bounds( 2 ), upper_bounds( 2 );
@@ -79,6 +115,11 @@ create_single_track_lane_following_ocp()
   return problem;
 }
 
+#include <chrono>
+#include <iomanip>
+#include <iostream>
+#include <map>
+
 void
 single_track_test()
 {
@@ -89,47 +130,51 @@ single_track_test()
   int    max_iterations = 100;
   double tolerance      = 1e-7;
 
-  // Solve with iLQR
-  auto start_ilqr = std::chrono::high_resolution_clock::now();
-  ilqr_solver( problem, max_iterations, tolerance );
-  auto   end_ilqr     = std::chrono::high_resolution_clock::now();
-  double elapsed_ilqr = std::chrono::duration<double, std::milli>( end_ilqr - start_ilqr ).count();
-  double ilqr_cost    = problem.best_cost;
-  problem.reset();
+  // Define solvers in a map
+  std::map<std::string, Solver> solvers = {
+    { "iLQR", ilqr_solver },
+    {  "CGD",  cgd_solver },
+    { "OSQP", osqp_solver }
+  };
 
-  // Solve with Gradient Descent (GD)
-  auto start_gd = std::chrono::high_resolution_clock::now();
-  gradient_descent_solver( problem, max_iterations, tolerance );
-  auto   end_gd     = std::chrono::high_resolution_clock::now();
-  double elapsed_gd = std::chrono::duration<double, std::milli>( end_gd - start_gd ).count();
-  double gd_cost    = problem.best_cost;
-  problem.reset();
+  struct SolverResult
+  {
+    double cost;
+    double time;
+  };
 
-  // Solve with Constrained Gradient Descent (CGD)
-  auto start_cgd = std::chrono::high_resolution_clock::now();
-  constrained_gradient_descent_solver( problem, max_iterations, tolerance );
-  auto   end_cgd     = std::chrono::high_resolution_clock::now();
-  double elapsed_cgd = std::chrono::duration<double, std::milli>( end_cgd - start_cgd ).count();
-  double cgd_cost    = problem.best_cost;
-  problem.reset();
+  std::map<std::string, SolverResult> results;
 
-  // Solve with OSQP
-  auto start_osqp = std::chrono::high_resolution_clock::now();
-  osqp_solver( problem, max_iterations, tolerance );
-  auto   end_osqp     = std::chrono::high_resolution_clock::now();
-  double elapsed_osqp = std::chrono::duration<double, std::milli>( end_osqp - start_osqp ).count();
-  double osqp_cost    = problem.best_cost;
-  problem.reset();
+  // Run solvers
+  for( const auto& [name, solver] : solvers )
+  {
+    auto start = std::chrono::high_resolution_clock::now();
+    solver( problem, max_iterations, tolerance );
+    auto end = std::chrono::high_resolution_clock::now();
+
+    results[name] = { problem.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
+
+    problem.reset();
+  }
+
+  // Find best and worst values
+  auto [min_cost, max_cost] = std::minmax_element( results.begin(), results.end(),
+                                                   []( const auto& a, const auto& b ) { return a.second.cost < b.second.cost; } );
+
+  auto [min_time, max_time] = std::minmax_element( results.begin(), results.end(),
+                                                   []( const auto& a, const auto& b ) { return a.second.time < b.second.time; } );
 
   // Print structured results
   std::cerr << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
   std::cout << "🚗 Single-Track Lane Following Test 🚗\n";
   std::cout << "-----------------------------------\n";
+  std::cout << std::left << std::setw( 25 ) << "Solver" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)\n";
+  std::cout << "---------------------------------------------\n";
 
-  std::cout << "🔹 Single-track iLQR cost: " << ilqr_cost << "  | Time: " << elapsed_ilqr << " ms\n";
-  std::cout << "🔹 Single-track Gradient Descent cost: " << gd_cost << "  | Time: " << elapsed_gd << " ms\n";
-  std::cout << "🔹 Single-track Constrained GD cost: " << cgd_cost << "  | Time: " << elapsed_cgd << " ms\n";
-  std::cout << "🔹 Single-track OSQP cost: " << osqp_cost << "  | Time: " << elapsed_osqp << " ms\n";
+  for( const auto& [name, result] : results )
+  {
+    std::cout << std::left << std::setw( 25 ) << name << std::setw( 15 ) << result.cost << std::setw( 15 ) << result.time << "\n";
+  }
 
   std::cout << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
 }

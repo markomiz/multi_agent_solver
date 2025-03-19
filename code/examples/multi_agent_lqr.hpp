@@ -9,7 +9,7 @@
 
 #include "multi_agent_aggregator.hpp"
 #include "ocp.hpp"
-#include "solvers/constrained_gradient_descent.hpp"
+#include "solvers/cgd.hpp"
 #include "solvers/ilqr.hpp"
 #include "solvers/osqp_solver.hpp"
 #include "types.hpp"
@@ -105,26 +105,26 @@ multi_agent_lqr_example()
   aggregator.reset();
 
   start                       = std::chrono::high_resolution_clock::now();
-  double central_cgd_cost     = aggregator.solve_centralized( constrained_gradient_descent_solver, 100, 1e-5 );
+  double central_cgd_cost     = aggregator.solve_centralized( cgd_solver, 100, 1e-5 );
   end                         = std::chrono::high_resolution_clock::now();
   double centralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
   aggregator.reset();
 
   // Solve in decentralized mode
   start                          = std::chrono::high_resolution_clock::now();
-  double decentral_ilqr_cost     = aggregator.solve_decentralized( ilqr_solver, 10, 10, 1e-5 );
+  double decentral_ilqr_cost     = aggregator.solve_decentralized_line_search( ilqr_solver, 1, 100, 1e-5 );
   end                            = std::chrono::high_resolution_clock::now();
   double decentralized_ilqr_time = std::chrono::duration<double, std::milli>( end - start ).count();
   aggregator.reset();
 
   start                          = std::chrono::high_resolution_clock::now();
-  double decentral_osqp_cost     = aggregator.solve_decentralized( osqp_solver, 10, 10, 1e-5 );
+  double decentral_osqp_cost     = aggregator.solve_decentralized_line_search( osqp_solver, 1, 100, 1e-5 );
   end                            = std::chrono::high_resolution_clock::now();
   double decentralized_osqp_time = std::chrono::duration<double, std::milli>( end - start ).count();
   aggregator.reset();
 
   start                         = std::chrono::high_resolution_clock::now();
-  double decentral_cgd_cost     = aggregator.solve_decentralized( constrained_gradient_descent_solver, 10, 10, 1e-5 );
+  double decentral_cgd_cost     = aggregator.solve_decentralized_line_search( cgd_solver, 1, 100, 1e-5 );
   end                           = std::chrono::high_resolution_clock::now();
   double decentralized_cgd_time = std::chrono::duration<double, std::milli>( end - start ).count();
   aggregator.reset();

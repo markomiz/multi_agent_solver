@@ -10,8 +10,7 @@
 #include "multi_agent_single_track.hpp"
 #include "ocp.hpp"
 #include "single_track_ocp.hpp"
-#include "solvers/constrained_gradient_descent.hpp"
-#include "solvers/gradient_descent.hpp"
+#include "solvers/cgd.hpp"
 #include "solvers/ilqr.hpp"
 #include "solvers/osqp_solver.hpp"
 #include "types.hpp"
@@ -20,8 +19,13 @@ int
 main( int /*num_arguments*/, char** /*arguments*/ )
 {
   single_track_test();
-  multi_agent_lqr_example();
-  multi_agent_circular_test();
+  // multi_agent_lqr_example();
+  // multi_agent_circular_test( 1, 3 );
+  // multi_agent_circular_test( 1, 10 );
+  multi_agent_circular_test( 8, 10 );
+  multi_agent_circular_test( 8, 20 );
+  multi_agent_circular_test( 8, 30 );
+
 
   return 0;
 }

@@ -1,3 +1,6 @@
+# perf files
+*.data
+
 # Ignore build directories
 build/
 Build/

@@ -163,10 +163,11 @@ multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
     agent_ocps.push_back( agent_ocp );
     aggregator.agent_ocps[i] = agent_ocp;
   }
+  const int max_outer = 50;
 
-  const int    max_iter  = 2;
-  const int    max_outer = 50;
-  const double tolerance = 1e-8;
+  SolverParams params;
+  params["max_iterations"] = 2;
+  params["tolerance"]      = 1e-5;
 
   // Compute offsets for multi-agent system
   aggregator.compute_offsets();
@@ -179,15 +180,31 @@ multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
     {  "CGD",  cgd_solver }
   };
 
-  std::vector<std::pair<std::string, std::function<double( MultiAgentAggregator &, const Solver &, int, int, double )>>> solving_methods = {
-    {                " Centralized", []( MultiAgentAggregator &agg, const Solver &solver, int outer, int inner,
-     double tol ) { return agg.solve_centralized( solver, outer * inner, tol ); }              },
-    {       " Decentralized_Simple", []( MultiAgentAggregator &agg, const Solver &solver, int outer, int inner,
-     double tol ) { return agg.solve_decentralized_simple( solver, outer, inner, tol ); }      },
-    {  " Decentralized_Line_Search", []( MultiAgentAggregator &agg, const Solver &solver, int outer, int inner,
-     double tol ) { return agg.solve_decentralized_line_search( solver, outer, inner, tol ); } },
-    { " Decentralized_Trust_Region", []( MultiAgentAggregator &agg, const Solver &solver, int outer, int inner,
-     double tol ) { return agg.solve_decentralized_trust_region( solver, outer, inner, tol ); } }
+  std::vector<std::pair<std::string, std::function<double( MultiAgentAggregator &, const Solver &, int, const SolverParams &params )>>>
+    solving_methods = {
+      {                " Centralized",
+
+       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
+ return agg.solve_centralized( solver, params );
+ } },
+
+      {       " Decentralized_Simple",
+
+       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
+ return agg.solve_decentralized_simple( solver, outer, params );
+ } },
+
+      {  " Decentralized_Line_Search",
+
+       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
+ return agg.solve_decentralized_line_search( solver, outer, params );
+ } },
+
+      { " Decentralized_Trust_Region",
+
+       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
+ return agg.solve_decentralized_trust_region( solver, outer, params );
+ } }
   };
 
   // Storage for results
@@ -200,7 +217,7 @@ multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
     {
       aggregator.reset();
       auto   start_time = std::chrono::high_resolution_clock::now();
-      double cost       = method.second( aggregator, solver.second, max_outer, max_iter, tolerance );
+      double cost       = method.second( aggregator, solver.second, max_outer, params );
       auto   end_time   = std::chrono::high_resolution_clock::now();
       double time_ms    = std::chrono::duration<double, std::milli>( end_time - start_time ).count();
 
@@ -249,7 +266,7 @@ multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
       std::string cost_color = RESET;
       std::string time_color = RESET;
 
-      if( cost < 0.2 * ( max_cost - min_cost ) + min_cost )
+      if( cost < 0.1 * ( max_cost - min_cost ) + min_cost )
         cost_color = GREEN; // Best cost 🟩
       else if( cost < 0.5 * ( max_cost - min_cost ) + min_cost )
         cost_color = YELLOW; // Mid-range 🟨

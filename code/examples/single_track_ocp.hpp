@@ -126,9 +126,9 @@ single_track_test()
   // Build the lane-following OCP.
   OCP problem = create_single_track_lane_following_ocp();
 
-  // Set solver parameters.
-  int    max_iterations = 100;
-  double tolerance      = 1e-7;
+  SolverParams params;
+  params["max_iterations"] = 2;
+  params["tolerance"]      = 1e-5;
 
   // Define solvers in a map
   std::map<std::string, Solver> solvers = {
@@ -149,7 +149,7 @@ single_track_test()
   for( const auto& [name, solver] : solvers )
   {
     auto start = std::chrono::high_resolution_clock::now();
-    solver( problem, max_iterations, tolerance );
+    solver( problem, params );
     auto end = std::chrono::high_resolution_clock::now();
 
     results[name] = { problem.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };

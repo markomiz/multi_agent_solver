@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ocp.hpp"
+#include "solvers/solver.hpp"
 
 /**
  * @brief Struct to store each agent's dimensional offsets in the global vectors/matrices.
@@ -82,13 +83,14 @@ public:
   }
 
   double
-  solve_centralized( const Solver& solver, int max_iterations, double tolerance )
+  solve_centralized( const Solver& solver, const SolverParams& params )
   {
+
     if( agent_blocks.empty() )
       compute_offsets();
 
     OCP global_ocp = create_global_ocp();
-    solver( global_ocp, max_iterations, tolerance );
+    solver( global_ocp, params );
 
     // Update individual agent OCPs with solved global trajectory
     for( const auto& block : agent_blocks )
@@ -115,12 +117,12 @@ public:
   }
 
   void
-  solve_all_agents( const Solver& solver, int max_iterations, double tolerance )
+  solve_all_agents( const Solver& solver, const SolverParams& params )
   {
 #pragma omp parallel for
     for( size_t i = 0; i < agent_blocks.size(); ++i )
     {
-      solver( *agent_blocks[i].ocp_ptr, max_iterations, tolerance );
+      solver( *agent_blocks[i].ocp_ptr, params );
     }
 
 #pragma omp parallel for
@@ -167,8 +169,9 @@ public:
   }
 
   double
-  solve_decentralized_trust_region( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  solve_decentralized_trust_region( const Solver& solver, int max_outer_iterations, const SolverParams& params )
   {
+
     double total_cost = std::numeric_limits<double>::max();
 
     size_t              num_agents = agent_blocks.size();
@@ -176,11 +179,12 @@ public:
     const double        eta1 = 0.01, eta2 = 0.5;  // Trust-region acceptance thresholds
     const double        shrink_factor = 0.8, expand_factor = 1.5;
     const double        min_delta = 1e-3, max_delta = 1.0;
+    const double        tolerance = params.at( "tolerance" );
 
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
       auto prev_controls = backup_controls();
-      solve_all_agents( solver, max_inner_iterations, tolerance );
+      solve_all_agents( solver, params );
       auto new_controls   = backup_controls();
       auto control_deltas = compute_control_deltas( prev_controls, new_controls );
 
@@ -261,13 +265,14 @@ public:
   }
 
   double
-  solve_decentralized_simple( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  solve_decentralized_simple( const Solver& solver, int max_outer_iterations, const SolverParams& params )
   {
-    double total_cost = std::numeric_limits<double>::max();
+    double       total_cost = std::numeric_limits<double>::max();
+    const double tolerance  = params.at( "tolerance" );
 
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
-      solve_all_agents( solver, max_inner_iterations, tolerance );
+      solve_all_agents( solver, params );
       double new_total_cost = agent_cost_sum();
       if( total_cost > new_total_cost + tolerance )
         total_cost = new_total_cost;
@@ -281,19 +286,21 @@ public:
   }
 
   double
-  solve_decentralized_line_search( const Solver& solver, int max_outer_iterations, int max_inner_iterations, double tolerance )
+  solve_decentralized_line_search( const Solver& solver, int max_outer_iterations, const SolverParams& params )
   {
     double total_cost = std::numeric_limits<double>::max();
 
-    const double                   c1        = 1e-4; // Armijo parameter (small)
-    const double                   reduction = 0.5;  // Backtracking factor
-    const double                   min_alpha = 1e-3; // Minimum step size
+    const double c1        = 1e-4; // Armijo parameter (small)
+    const double reduction = 0.5;  // Backtracking factor
+    const double min_alpha = 1e-3; // Minimum step size
+    const double tolerance = params.at( "tolerance" );
+
     std::vector<ControlTrajectory> blended_controls( agent_blocks.size() );
     for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
     {
       // Backup controls before optimization
       auto prev_controls = backup_controls();
-      solve_all_agents( solver, max_inner_iterations, tolerance );
+      solve_all_agents( solver, params );
 
       auto new_controls   = backup_controls();
       auto control_deltas = compute_control_deltas( prev_controls, new_controls );

@@ -9,6 +9,7 @@
 
 #include "integrator.hpp"
 #include "ocp.hpp"
+#include "solver.hpp"
 #include "types.hpp"
 
 /**
@@ -20,8 +21,13 @@
  * @param tolerance      Convergence threshold on cost improvement
  */
 inline void
-ilqr_solver( OCP& problem, int max_iterations = 100, double tolerance = 1e-6 )
+ilqr_solver( OCP& problem, const SolverParams& params )
 {
+
+  // Extract parameters
+  const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
+  const double tolerance      = params.at( "tolerance" );
+
   // Extract problem dimensions
   const int    T   = problem.horizon_steps;
   const int    n_x = problem.state_dim;

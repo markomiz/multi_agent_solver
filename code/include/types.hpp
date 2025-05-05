@@ -1,9 +1,11 @@
 #pragma once
 #include <functional>
+#include <iomanip> // For std::setw
+#include <iostream>
+#include <map>
+#include <unordered_map>
 
 #include <Eigen/Dense>
-
-
 // Types defined for clarity in other functions
 using State             = Eigen::VectorXd;
 using StateDerivative   = Eigen::VectorXd;
@@ -45,10 +47,6 @@ using GradientComputer
   = std::function<ControlGradient( const State& initial_state, const ControlTrajectory& controls, const MotionModel& dynamics,
                                    const ObjectiveFunction& objective_function, double timestep )>;
 
-
-#include <iomanip> // For std::setw
-#include <iostream>
-#include <map>
 
 // ANSI Escape Codes for Colors
 #define RESET  "\033[0m"

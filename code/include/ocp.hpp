@@ -181,5 +181,3 @@ struct OCP
     return true;
   }
 };
-
-using Solver = std::function<void( OCP&, int, double )>;

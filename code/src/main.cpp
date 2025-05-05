@@ -19,12 +19,12 @@ int
 main( int /*num_arguments*/, char** /*arguments*/ )
 {
   single_track_test();
-  // multi_agent_lqr_example();
+  multi_agent_lqr_example();
   // multi_agent_circular_test( 1, 3 );
   // multi_agent_circular_test( 1, 10 );
-  multi_agent_circular_test( 8, 10 );
-  multi_agent_circular_test( 8, 20 );
-  multi_agent_circular_test( 8, 30 );
+  multi_agent_circular_test( 10, 15 );
+  // multi_agent_circular_test( 8, 20 );
+  // multi_agent_circular_test( 8, 30 );
 
 
   return 0;

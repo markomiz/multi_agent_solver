@@ -9,11 +9,16 @@
 #include "integrator.hpp"
 #include "line_search.hpp"
 #include "ocp.hpp"
+#include "solver.hpp"
 #include "types.hpp"
 
 void
-cgd_solver( OCP& problem, int max_iterations, double tolerance )
+cgd_solver( OCP& problem, const SolverParams& params )
 {
+
+  // Extract parameters
+  const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
+  const double tolerance      = params.at( "tolerance" );
 
   // Initialize Lagrange multipliers and penalty parameter
   ConstraintViolations equality_multipliers   = problem.equality_constraints

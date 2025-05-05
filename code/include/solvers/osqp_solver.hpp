@@ -11,6 +11,7 @@
 
 #include "integrator.hpp" // must provide integrate_horizon() and integrate_rk4()
 #include "ocp.hpp"        // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
+#include "solver.hpp"
 #include <OsqpEigen/OsqpEigen.h>
 
 //====================================================================
@@ -310,8 +311,13 @@ constructQPData( const OCP &problem, const StateTrajectory &states, const Contro
 // state trajectory, and control trajectory.
 //
 inline void
-osqp_solver( OCP &problem, int max_iterations = 100, double tolerance = 1e-5 )
+osqp_solver( OCP &problem, const SolverParams &params )
 {
+
+  // Extract parameters
+  const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
+  const double tolerance      = params.at( "tolerance" );
+
   using namespace osqp_solver_ns;
   int T           = problem.horizon_steps;
   int n_x         = problem.state_dim;

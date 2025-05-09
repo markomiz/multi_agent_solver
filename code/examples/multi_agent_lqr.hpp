@@ -46,17 +46,17 @@ create_linear_lqr_ocp( int state_dim, int control_dim, double dt, int horizon_st
 
   // Set analytic derivatives.
   // Dynamics derivatives.
-  ocp.dynamics_state_jacobian   = [A]( const MotionModel&, const State&, const Control& ) -> Eigen::MatrixXd { return A; };
-  ocp.dynamics_control_jacobian = [B]( const MotionModel&, const State&, const Control& ) -> Eigen::MatrixXd { return B; };
-  // Cost derivatives.
-  ocp.cost_state_gradient   = [Q]( const StageCostFunction&, const State& x, const Control& ) -> Eigen::VectorXd { return 2.0 * Q * x; };
-  ocp.cost_control_gradient = [R]( const StageCostFunction&, const State&, const Control& u ) -> Eigen::VectorXd { return 2.0 * R * u; };
-  ocp.cost_state_hessian    = [Q]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd { return 2.0 * Q; };
-  ocp.cost_control_hessian  = [R]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd { return 2.0 * R; };
-  ocp.cost_cross_term       = [state_dim, control_dim]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
-    // With a separable cost, cross derivatives are zero.
-    return Eigen::MatrixXd::Zero( state_dim, control_dim );
-  };
+  // ocp.dynamics_state_jacobian   = [A]( const MotionModel&, const State&, const Control& ) -> Eigen::MatrixXd { return A; };
+  // ocp.dynamics_control_jacobian = [B]( const MotionModel&, const State&, const Control& ) -> Eigen::MatrixXd { return B; };
+  // // Cost derivatives.
+  // ocp.cost_state_gradient   = [Q]( const StageCostFunction&, const State& x, const Control& ) -> Eigen::VectorXd { return 2.0 * Q * x; };
+  // ocp.cost_control_gradient = [R]( const StageCostFunction&, const State&, const Control& u ) -> Eigen::VectorXd { return 2.0 * R * u; };
+  // ocp.cost_state_hessian    = [Q]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd { return 2.0 * Q; };
+  // ocp.cost_control_hessian  = [R]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd { return 2.0 * R; };
+  // ocp.cost_cross_term       = [state_dim, control_dim]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  //   // With a separable cost, cross derivatives are zero.
+  //   return Eigen::MatrixXd::Zero( state_dim, control_dim );
+  // };
 
   ocp.initialize_problem();
   ocp.verify_problem();

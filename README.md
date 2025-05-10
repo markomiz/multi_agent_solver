@@ -86,7 +86,7 @@ You can modify the agent count and parameters directly to experiment with differ
 ## Results
 
 Times and costs for different methods in the example code:
-
+```
 ========================================================================================
 Outer Method                            Solver              Time (ms)           Cost                
 ========================================================================================
@@ -103,7 +103,7 @@ Outer Method                            Solver              Time (ms)           
  Decentralized_Trust_Region             OSQP                9.96                76.3330             
  Decentralized_Trust_Region             iLQR                6.02                78.1107             
 =======================================================================================
-
+```
 
 
 ## License

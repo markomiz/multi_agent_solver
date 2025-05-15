@@ -8,8 +8,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ocp.hpp"
-#include "solvers/solver.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
 
 /**
  * @brief Struct to store each agent's dimensional offsets in the global vectors/matrices.

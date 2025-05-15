@@ -4,11 +4,11 @@
 
 #include <Eigen/Dense>
 
-#include "finite_differences.hpp"
-#include "integrator.hpp"
-#include "line_search.hpp"
-#include "ocp.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/finite_differences.hpp"
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/line_search.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/types.hpp"
 
 // Helper function to compute the augmented cost
 inline double

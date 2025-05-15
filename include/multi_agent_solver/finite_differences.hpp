@@ -1,15 +1,12 @@
 #pragma once
 
-#include "integrator.hpp"
-#include "types.hpp"
-#pragma once
 #include <algorithm>
 #include <functional>
 
 #include <Eigen/Dense>
 
-#include "integrator.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/types.hpp"
 
 //================================================================
 // Finite Differences for the Overall Trajectory Cost

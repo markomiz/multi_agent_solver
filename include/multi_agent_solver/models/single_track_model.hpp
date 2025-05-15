@@ -1,7 +1,7 @@
 #pragma once
 #include <Eigen/Dense>
 
-#include "types.hpp"
+#include "multi_agent_solver/types.hpp"
 
 /**
  * @brief Single-track kinematic bicycle model **with time as a state**.

@@ -6,9 +6,9 @@
 
 #include <Eigen/Dense>
 
-#include "integrator.hpp"
-#include "ocp.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/types.hpp"
 
 // Generic line search function alias
 using LineSearchFunction = std::function<

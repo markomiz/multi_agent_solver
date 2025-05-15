@@ -1,17 +1,16 @@
-#pragma once
 #include <chrono>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <vector>
 
-#include "models/single_track_model.hpp"
-#include "multi_agent_aggregator.hpp"
-#include "ocp.hpp"
-#include "solvers/cgd.hpp"
-#include "solvers/ilqr.hpp"
-#include "solvers/osqp_solver.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/models/single_track_model.hpp"
+#include "multi_agent_solver/multi_agent_aggregator.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/cgd.hpp"
+#include "multi_agent_solver/solvers/ilqr.hpp"
+#include "multi_agent_solver/solvers/osqp_solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int agent_id,
@@ -141,9 +140,11 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   return problem;
 }
 
-void
-multi_agent_circular_test( int num_agents = 10, int time_steps = 10 )
+int
+main( int /*num_arguments*/, char ** /*arguments*/ )
 {
+  int          num_agents      = 10;
+  int          time_steps      = 10;
   const double track_radius    = 20.0;
   const double target_velocity = 5.0;
 

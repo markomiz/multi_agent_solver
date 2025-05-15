@@ -1,15 +1,16 @@
-#pragma once
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <string>
 
-#include "models/single_track_model.hpp"
-#include "ocp.hpp"
-#include "solvers/cgd.hpp"
-#include "solvers/ilqr.hpp"
-#include "solvers/osqp_solver.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/models/single_track_model.hpp"
+#include "multi_agent_solver/multi_agent_aggregator.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/cgd.hpp"
+#include "multi_agent_solver/solvers/ilqr.hpp"
+#include "multi_agent_solver/solvers/osqp_solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 OCP
 create_single_track_lane_following_ocp()
@@ -115,13 +116,8 @@ create_single_track_lane_following_ocp()
   return problem;
 }
 
-#include <chrono>
-#include <iomanip>
-#include <iostream>
-#include <map>
-
-void
-single_track_test()
+int
+main( int /*num_arguments*/, char** /*arguments*/ )
 {
   // Build the lane-following OCP.
   OCP problem = create_single_track_lane_following_ocp();

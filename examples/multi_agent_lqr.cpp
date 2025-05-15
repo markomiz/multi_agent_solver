@@ -1,4 +1,3 @@
-#pragma once
 #include <chrono>
 #include <iostream>
 #include <map>
@@ -7,12 +6,13 @@
 
 #include "Eigen/Dense"
 
-#include "multi_agent_aggregator.hpp"
-#include "ocp.hpp"
-#include "solvers/cgd.hpp"
-#include "solvers/ilqr.hpp"
-#include "solvers/osqp_solver.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/models/single_track_model.hpp"
+#include "multi_agent_solver/multi_agent_aggregator.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/cgd.hpp"
+#include "multi_agent_solver/solvers/ilqr.hpp"
+#include "multi_agent_solver/solvers/osqp_solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 //---------------------------------------------------------------------
 // A helper function that creates a linear LQR OCP for a single agent.
@@ -69,8 +69,8 @@ create_linear_lqr_ocp( int state_dim, int control_dim, double dt, int horizon_st
 // solves it using the iLQR solver, and then extracts per-agent solutions.
 //---------------------------------------------------------------------
 
-void
-multi_agent_lqr_example()
+int
+main( int /*num_arguments*/, char** /*arguments*/ )
 {
   const int    num_agents    = 10;
   const int    state_dim     = 4;

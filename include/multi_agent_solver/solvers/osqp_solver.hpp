@@ -9,9 +9,9 @@
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 
-#include "integrator.hpp" // must provide integrate_horizon() and integrate_rk4()
-#include "ocp.hpp"        // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
-#include "solver.hpp"
+#include "multi_agent_solver/integrator.hpp" // must provide integrate_horizon() and integrate_rk4()
+#include "multi_agent_solver/ocp.hpp"        // defines OCP, State, Control, StateTrajectory, ControlTrajectory, etc.
+#include "multi_agent_solver/solvers/solver.hpp"
 #include <OsqpEigen/OsqpEigen.h>
 
 //====================================================================

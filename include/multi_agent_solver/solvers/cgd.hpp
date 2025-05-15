@@ -4,13 +4,13 @@
 
 #include <Eigen/Dense>
 
-#include "constraint_helpers.hpp"
-#include "finite_differences.hpp"
-#include "integrator.hpp"
-#include "line_search.hpp"
-#include "ocp.hpp"
-#include "solver.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/constraint_helpers.hpp"
+#include "multi_agent_solver/finite_differences.hpp"
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/line_search.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 void
 cgd_solver( OCP& problem, const SolverParams& params )

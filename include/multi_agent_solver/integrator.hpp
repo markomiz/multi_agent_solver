@@ -3,10 +3,7 @@
 
 #include <Eigen/Dense>
 
-#include "types.hpp"
-
-#pragma once
-#include "types.hpp"
+#include "multi_agent_solver/types.hpp"
 
 // Single-step Euler integration
 inline State

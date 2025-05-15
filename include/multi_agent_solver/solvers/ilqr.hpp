@@ -7,10 +7,10 @@
 
 #include <Eigen/Dense>
 
-#include "integrator.hpp"
-#include "ocp.hpp"
-#include "solver.hpp"
-#include "types.hpp"
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 /**
  * @brief A standard iLQR solver that stores K[t], k[t] for each step t and performs

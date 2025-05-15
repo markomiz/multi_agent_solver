@@ -74,6 +74,17 @@ endif()
 install(TARGETS MultiAgentSolver EXPORT MultiAgentSolverTargets)
 install(DIRECTORY include/ DESTINATION include)
 
+# === Install Headers (.h and .hpp) ===
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/
+        DESTINATION include
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+
+# === Install Library ===
+install(TARGETS MultiAgentSolver
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib)
+
+
 # Export package
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
@@ -99,3 +110,4 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/MultiAgentSolverConfigVersion.cmake"
     DESTINATION lib/cmake/MultiAgentSolver
 )
+

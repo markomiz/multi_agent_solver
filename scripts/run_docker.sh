@@ -15,3 +15,4 @@ docker build --no-cache -t multi_agent_solver .
 # Run the Docker container
 echo "🚀 Running Docker container..."
 docker run --name multi_agent_solver --rm -it multi_agent_solver
+

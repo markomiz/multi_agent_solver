@@ -18,4 +18,13 @@ cmake --build . --target install
 cd /
 rm -rf /tmp/osqp
 
+git clone https://github.com/robotology/osqp-eigen.git /tmp/osqp-eigen
+cd /tmp/osqp-eigen
+mkdir build && cd build
+cmake ..
+make -j$(nproc)
+make install
+cd /
+rm -rf /tmp/osqp-eigen
+
 echo "✅ OSQP installed successfully."

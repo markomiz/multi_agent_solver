@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>multi_agent_solver</name>
+  <version>0.10.1</version>
+  <description>Multi Agent OCP solver</description>
+  <maintainer email="markomizdrak@gmail.com">Marko Mizdrak</maintainer>
+
+  <license>Apache 2.0</license>
+
+  <url type="website">https://github.com/markomiz/multi_agent_solver</url>
+
+  <depend>osqp-eigen</depend>
+  <depend>eigen</depend>
+
+  <buildtool_depend>cmake</buildtool_depend>
+  <export>
+    <build_type>cmake</build_type>
+  </export>
+</package>

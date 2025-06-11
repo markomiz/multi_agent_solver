@@ -10,7 +10,7 @@ option(BUILD_SHARED_LIBS "Build as shared library" OFF)
 option(MAS_ENABLE_FETCHCONTENT "Enable FetchContent fallback for dependencies" OFF)
 
 # Dependencies
-find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(OpenMP)
 find_package(osqp REQUIRED)
 find_package(OsqpEigen REQUIRED)

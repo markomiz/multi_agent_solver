@@ -12,7 +12,7 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
-void
+inline void
 cgd_solver( OCP& problem, const SolverParams& params )
 {
 

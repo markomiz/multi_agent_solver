@@ -8,7 +8,7 @@
 #include "multi_agent_solver/finite_differences.hpp"
 #include "multi_agent_solver/types.hpp"
 
-double
+inline double
 compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, const StageCostFunction& stage_cost,
                          const TerminalCostFunction& terminal_cost )
 {

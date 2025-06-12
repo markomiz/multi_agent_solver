@@ -17,7 +17,7 @@
  *   u(0) = delta [rad]  - Steering angle
  *   u(1) = a     [m/s²] - Acceleration
  */
-StateDerivative
+inline StateDerivative
 single_track_model( const State& x, const Control& u )
 {
   double psi = x( 2 );

@@ -20,7 +20,7 @@ using MotionModel = std::function<StateDerivative( const State&, const Control& 
 using ObjectiveFunction = std::function<double( const StateTrajectory&, const ControlTrajectory& )>;
 
 // A stage cost is evaluated on a single (state, control) pair.
-using StageCostFunction = std::function<double( const State&, const Control& )>;
+using StageCostFunction = std::function<double( const State&, const Control&, size_t time_idx )>;
 // A terminal cost is evaluated on the final state.
 using TerminalCostFunction = std::function<double( const State& )>;
 
@@ -35,11 +35,11 @@ using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const Sta
 // Derivative interfaces
 using DynamicsStateJacobian   = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
 using DynamicsControlJacobian = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
-using CostStateGradient       = std::function<Eigen::VectorXd( const StageCostFunction& objective, const State&, const Control& )>;
-using CostControlGradient     = std::function<Eigen::VectorXd( const StageCostFunction& objective, const State&, const Control& )>;
-using CostStateHessian        = std::function<Eigen::MatrixXd( const StageCostFunction& objective, const State&, const Control& )>;
-using CostControlHessian      = std::function<Eigen::MatrixXd( const StageCostFunction& objective, const State&, const Control& )>;
-using CostCrossTerm           = std::function<Eigen::MatrixXd( const StageCostFunction& objective, const State&, const Control& )>;
+using CostStateGradient       = std::function<Eigen::VectorXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using CostControlGradient     = std::function<Eigen::VectorXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using CostStateHessian        = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using CostControlHessian      = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using CostCrossTerm           = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
 using ControlGradient         = Eigen::MatrixXd;
 
 // GradientComputer interface

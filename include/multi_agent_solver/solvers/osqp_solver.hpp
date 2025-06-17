@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 #include <vector>
 
@@ -58,9 +59,9 @@ construct_hessian( const OCP &problem, const StateTrajectory &states, const Cont
     // For terminal time t==T, if a dedicated terminal cost is not available, use the stage cost Hessian.
     Eigen::MatrixXd Q;
     if( t == T )
-      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( std::min( t, T - 1 ) ) );
+      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( std::min( t, T - 1 ) ), t );
     else
-      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( t ) );
+      Q = problem.cost_state_hessian( problem.stage_cost, states.col( t ), controls.col( t ), t );
     for( int i = 0; i < n_x; ++i )
     {
       int    idx   = t * n_x + i;
@@ -73,7 +74,7 @@ construct_hessian( const OCP &problem, const StateTrajectory &states, const Cont
   // --- Control Blocks ---
   for( int t = 0; t < T; ++t )
   {
-    Eigen::MatrixXd R = problem.cost_control_hessian( problem.stage_cost, states.col( t ), controls.col( t ) );
+    Eigen::MatrixXd R = problem.cost_control_hessian( problem.stage_cost, states.col( t ), controls.col( t ), t );
     for( int i = 0; i < n_u; ++i )
     {
       int    idx   = ( T + 1 ) * n_x + t * n_u + i;
@@ -107,13 +108,13 @@ construct_gradient( const OCP &problem, const StateTrajectory &states, const Con
   for( int t = 0; t < T + 1; ++t )
   {
     Eigen::VectorXd g;
-    g                         = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
+    g                         = problem.cost_state_gradient( problem.stage_cost, states.col( t ), controls.col( t ), t );
     q.segment( t * n_x, n_x ) = g;
   }
   // Control gradients:
   for( int t = 0; t < T; ++t )
   {
-    Eigen::VectorXd g                           = problem.cost_control_gradient( problem.stage_cost, states.col( t ), controls.col( t ) );
+    Eigen::VectorXd g = problem.cost_control_gradient( problem.stage_cost, states.col( t ), controls.col( t ), t );
     q.segment( ( T + 1 ) * n_x + t * n_u, n_u ) = g;
   }
   return q;
@@ -317,6 +318,9 @@ osqp_solver( OCP &problem, const SolverParams &params )
   // Extract parameters
   const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
   const double tolerance      = params.at( "tolerance" );
+  const double max_ms         = params.at( "max_ms" );
+  using clock                 = std::chrono::high_resolution_clock;
+  auto start_time             = clock::now();
 
   using namespace osqp_solver_ns;
   int T           = problem.horizon_steps;
@@ -375,6 +379,13 @@ osqp_solver( OCP &problem, const SolverParams &params )
   // Main iterative loop.
   for( int iter = 0; iter < max_iterations; ++iter )
   {
+    auto   now        = clock::now();
+    double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( now - start_time ).count();
+    if( elapsed_ms > max_ms )
+    {
+      std::cout << "iLQR solver terminated early due to max_ms constraint (" << elapsed_ms << " ms > " << max_ms << " ms)\n";
+      break;
+    }
     // Adaptive Hessian regularization.
     double                      current_reg     = 0.0;
     const int                   max_attempts    = 10;

@@ -40,7 +40,7 @@ create_single_track_lane_following_ocp()
   const double w_acc   = 0.1; // Penalize acceleration.
 
   // Stage cost function.
-  problem.stage_cost = [=]( const State& state, const Control& control ) -> double {
+  problem.stage_cost = [=]( const State& state, const Control& control, size_t idx ) -> double {
     // Unpack state: we only use Y (index 1) and vx (index 3).
     double y  = state( 1 );
     double vx = state( 3 );
@@ -62,7 +62,7 @@ create_single_track_lane_following_ocp()
   problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
   // --- Add analytic derivatives for the cost function. ---
   // Gradient with respect to state.
-  problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control& ) -> Eigen::VectorXd {
+  problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control&, size_t time_idx ) -> Eigen::VectorXd {
     Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
     // Only Y (index 1) and vx (index 3) appear in the cost.
     grad( 1 ) = 2.0 * w_lane * state( 1 );
@@ -71,7 +71,8 @@ create_single_track_lane_following_ocp()
   };
 
   // Gradient with respect to control.
-  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control ) -> Eigen::VectorXd {
+  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control,
+                                       size_t time_idx ) -> Eigen::VectorXd {
     Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
     grad( 0 )            = 2.0 * w_delta * control( 0 );
     grad( 1 )            = 2.0 * w_acc * control( 1 );
@@ -79,7 +80,7 @@ create_single_track_lane_following_ocp()
   };
 
   // Hessian with respect to state.
-  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t time_idx ) -> Eigen::MatrixXd {
     Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
     H( 1, 1 )         = 2.0 * w_lane;
     H( 3, 3 )         = 2.0 * w_speed;
@@ -87,7 +88,7 @@ create_single_track_lane_following_ocp()
   };
 
   // Hessian with respect to control.
-  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control& ) -> Eigen::MatrixXd {
+  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t time_idx ) -> Eigen::MatrixXd {
     Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
     H( 0, 0 )         = 2.0 * w_delta;
     H( 1, 1 )         = 2.0 * w_acc;
@@ -125,6 +126,8 @@ main( int /*num_arguments*/, char** /*arguments*/ )
   SolverParams params;
   params["max_iterations"] = 2;
   params["tolerance"]      = 1e-5;
+  params["max_ms"]         = 100;
+
 
   // Define solvers in a map
   std::map<std::string, Solver> solvers = {

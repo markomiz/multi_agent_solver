@@ -18,7 +18,7 @@ compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, c
   double cost = 0.0;
   for( int t = 0; t < T; ++t )
   {
-    cost += stage_cost( X.col( t ), U.col( t ) );
+    cost += stage_cost( X.col( t ), U.col( t ), t );
   }
   cost += terminal_cost( X.col( Tp1 - 1 ) );
   return cost;

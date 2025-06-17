@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <functional>
 #include <iostream>
 
@@ -19,6 +20,9 @@ cgd_solver( OCP& problem, const SolverParams& params )
   // Extract parameters
   const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
   const double tolerance      = params.at( "tolerance" );
+  const double max_ms         = params.at( "max_ms" );
+  using clock                 = std::chrono::high_resolution_clock;
+  auto start_time             = clock::now();
 
   // Initialize Lagrange multipliers and penalty parameter
   ConstraintViolations equality_multipliers   = problem.equality_constraints
@@ -42,6 +46,13 @@ cgd_solver( OCP& problem, const SolverParams& params )
 
   for( int iter = 0; iter < max_iterations; ++iter )
   {
+    auto   now        = clock::now();
+    double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( now - start_time ).count();
+    if( elapsed_ms > max_ms )
+    {
+      std::cout << "iLQR solver terminated early due to max_ms constraint (" << elapsed_ms << " ms > " << max_ms << " ms)\n";
+      break;
+    }
     // Compute the gradients
     ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics, problem.objective_function,
                                                              problem.dt );

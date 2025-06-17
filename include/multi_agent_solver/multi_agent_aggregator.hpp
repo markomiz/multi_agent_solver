@@ -416,7 +416,7 @@ private:
   void
   setup_objective_function( OCP& global_ocp ) const
   {
-    global_ocp.stage_cost = [this]( const State& full_x, const Control& full_u ) -> double {
+    global_ocp.stage_cost = [this]( const State& full_x, const Control& full_u, size_t time_index ) -> double {
       double total_cost = 0.0;
 
       if( !use_only_global_cost_and_constraints )
@@ -426,7 +426,7 @@ private:
           State   x_agent = full_x.segment( block.state_offset, block.state_dim );
           Control u_agent = full_u.segment( block.control_offset, block.control_dim );
 
-          total_cost += block.ocp_ptr->stage_cost( x_agent, u_agent );
+          total_cost += block.ocp_ptr->stage_cost( x_agent, u_agent, time_index );
         }
       }
 

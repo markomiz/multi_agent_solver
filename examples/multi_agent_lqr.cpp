@@ -39,7 +39,7 @@ create_linear_lqr_ocp( int state_dim, int control_dim, double dt, int horizon_st
   // Quadratic cost: l(x,u) = xᵀQx + uᵀRu.
   Eigen::MatrixXd Q = Eigen::MatrixXd::Identity( state_dim, state_dim );
   Eigen::MatrixXd R = Eigen::MatrixXd::Identity( control_dim, control_dim );
-  ocp.stage_cost    = [Q, R]( const State& x, const Control& u ) -> double {
+  ocp.stage_cost    = [Q, R]( const State& x, const Control& u, size_t idx ) -> double {
     return ( x.transpose() * Q * x ).value() + ( u.transpose() * R * u ).value();
   };
   ocp.terminal_cost = []( const State& ) -> double { return 0.0; };
@@ -94,6 +94,8 @@ main( int /*num_arguments*/, char** /*arguments*/ )
   SolverParams params;
   params["max_iterations"] = 100;
   params["tolerance"]      = 1e-5;
+  params["max_ms"]         = 100;
+
 
   // Solve in centralized mode
   auto   start                 = std::chrono::high_resolution_clock::now();

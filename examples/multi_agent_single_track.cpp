@@ -35,7 +35,7 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   // Dynamics
   problem.dynamics = single_track_model;
 
-  problem.stage_cost = [&, id = agent_id]( const State &state, const Control &control ) -> double {
+  problem.stage_cost = [&, id = agent_id]( const State &state, const Control &control, size_t idx ) -> double {
     // Cost weights
     const double w_track      = 0.1;
     const double w_speed      = 0.1;
@@ -169,6 +169,8 @@ main( int /*num_arguments*/, char ** /*arguments*/ )
   SolverParams params;
   params["max_iterations"] = 2;
   params["tolerance"]      = 1e-5;
+  params["max_ms"]         = 100;
+
 
   // Compute offsets for multi-agent system
   aggregator.compute_offsets();

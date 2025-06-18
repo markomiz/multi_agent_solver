@@ -1,21 +1,21 @@
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "multi_agent_solver/models/single_track_model.hpp"
 #include "multi_agent_solver/multi_agent_aggregator.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/cgd.hpp"
-#include "multi_agent_solver/solvers/ilqr.hpp"
-#include "multi_agent_solver/solvers/osqp_solver.hpp"
-#include "multi_agent_solver/types.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
 
-OCP
+mas::OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int agent_id,
-                                  const std::vector<std::shared_ptr<OCP>> &all_agents, int time_steps )
+                                  const std::vector<std::shared_ptr<mas::OCP>> &all_agents, int time_steps )
 {
+  using namespace mas;
   OCP problem;
 
   // System dimensions
@@ -140,156 +140,126 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   return problem;
 }
 
-int
-main( int /*num_arguments*/, char ** /*arguments*/ )
+/*────────────────────────────  type lists  ────────────────────────────*/
+using SolverList = std::tuple<mas::iLQR, mas::OSQP, mas::CGD>;
+
+enum class Method
 {
-  int          num_agents      = 10;
-  int          time_steps      = 10;
-  const double track_radius    = 20.0;
-  const double target_velocity = 5.0;
+  Centralized,
+  Simple,
+  LineSearch,
+  TrustRegion
+};
+constexpr std::array all_methods = { Method::Centralized, Method::Simple, Method::LineSearch, Method::TrustRegion };
 
-  // Create aggregator for multi-agent problem
-  MultiAgentAggregator aggregator;
+constexpr std::string_view
+method_name( Method m )
+{
+  switch( m )
+  {
+    case Method::Centralized:
+      return "Centralized";
+    case Method::Simple:
+      return "Decentralized Simple";
+    case Method::LineSearch:
+      return "Decentralized Line Search";
+    default:
+      return "Decentralized Trust Region";
+  }
+}
 
-  // Vector of agent OCPs (so cost function can access them)
+/*────────────────────  run one <method,solver>  ───────────────────────*/
+template<Method M, typename SolverT>
+double
+run_method( mas::MultiAgentAggregator &agg, int max_outer, const mas::SolverParams &p )
+{
+  if constexpr( M == Method::Centralized )
+    return agg.solve_centralized<SolverT>( p );
+
+  else if constexpr( M == Method::Simple )
+    return agg.solve_decentralized_simple<SolverT>( max_outer, p );
+
+  else if constexpr( M == Method::LineSearch )
+    return agg.solve_decentralized_line_search<SolverT>( max_outer, p );
+
+  else /* TrustRegion */
+    return agg.solve_decentralized_trust_region<SolverT>( max_outer, p );
+}
+
+/*─────────────────────────  user OCP builder  ─────────────────────────*/
+// (same as before) create_single_track_circular_ocp(...)
+
+/*────────────────────────────────  main  ──────────────────────────────*/
+
+struct Result
+{
+  std::string name;
+  double      cost;
+  double      time_ms;
+};
+
+int
+main()
+{
+  using namespace mas;
+  constexpr int    num_agents      = 10;
+  constexpr int    time_steps      = 10;
+  constexpr double track_radius    = 20.0;
+  constexpr double target_velocity = 5.0;
+
+  MultiAgentAggregator              aggregator;
   std::vector<std::shared_ptr<OCP>> agent_ocps;
 
-  // Assign each agent an OCP with an initial position along the circle
   for( int i = 0; i < num_agents; ++i )
   {
-    double initial_theta = 2.0 * M_PI * i / num_agents;
-    auto   agent_ocp     = std::make_shared<OCP>(
-      create_single_track_circular_ocp( initial_theta, track_radius, target_velocity, i, agent_ocps, time_steps ) );
-    agent_ocp->id = i;
-    agent_ocps.push_back( agent_ocp );
-    aggregator.agent_ocps[i] = agent_ocp;
+    double theta  = 2.0 * M_PI * i / num_agents;
+    auto   ocp_sp = std::make_shared<OCP>(
+      create_single_track_circular_ocp( theta, track_radius, target_velocity, i, agent_ocps, time_steps ) );
+    ocp_sp->id = i;
+    agent_ocps.push_back( ocp_sp );
+    aggregator.agent_ocps[i] = ocp_sp;
   }
-  const int max_outer = 50;
 
-  SolverParams params;
-  params["max_iterations"] = 2;
-  params["tolerance"]      = 1e-5;
-  params["max_ms"]         = 100;
+  aggregator.compute_offsets(); // once
 
+  SolverParams params{
+    { "max_iterations",    2 },
+    {      "tolerance", 1e-5 },
+    {         "max_ms",  100 }
+  };
+  constexpr int max_outer = 50;
 
-  // Compute offsets for multi-agent system
-  aggregator.compute_offsets();
-  aggregator.reset();
+  std::vector<Result> results;
 
-  // Define solvers and multi-agent solving methods
-  std::vector<std::pair<std::string, Solver>> solvers = {
-    { "iLQR", ilqr_solver },
-    { "OSQP", osqp_solver },
-    {  "CGD",  cgd_solver }
+  auto time_solver = [&]( const std::string &name, auto &&solver_call ) {
+    aggregator.reset();
+    auto start = std::chrono::high_resolution_clock::now();
+    solver_call();
+    auto                                      end     = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    results.push_back( { name, aggregator.agent_cost_sum(), elapsed.count() } );
   };
 
-  std::vector<std::pair<std::string, std::function<double( MultiAgentAggregator &, const Solver &, int, const SolverParams &params )>>>
-    solving_methods = {
-      {                " Centralized",
+  // Benchmark solvers
+  time_solver( "Centralized iLQR", [&]() { aggregator.solve_centralized<iLQR>( params ); } );
+  time_solver( "Centralized CGD", [&]() { aggregator.solve_centralized<CGD>( params ); } );
+  time_solver( "Centralized OSQP", [&]() { aggregator.solve_centralized<OSQP>( params ); } );
+  time_solver( "Decentralized iLQR (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<iLQR>( max_outer, params ); } );
+  time_solver( "Decentralized iLQR (Line Search)", [&]() { aggregator.solve_decentralized_line_search<iLQR>( max_outer, params ); } );
+  time_solver( "Decentralized CGD (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<CGD>( max_outer, params ); } );
+  time_solver( "Decentralized CGD (Line Search)", [&]() { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<OSQP>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP (Line Search)", [&]() { aggregator.solve_decentralized_line_search<OSQP>( max_outer, params ); } );
 
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_centralized( solver, params );
- } },
+  // Output table
+  std::cout << std::fixed << std::setprecision( 6 ) << "\n";
+  std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << "\n";
+  std::cout << std::string( 70, '-' ) << "\n";
 
-      {       " Decentralized_Simple",
-
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_simple( solver, outer, params );
- } },
-
-      {  " Decentralized_Line_Search",
-
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_line_search( solver, outer, params );
- } },
-
-      { " Decentralized_Trust_Region",
-
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_trust_region( solver, outer, params );
- } }
-  };
-
-  // Storage for results
-  std::map<std::string, std::map<std::string, std::pair<double, double>>> results; // [method][solver] -> (cost, time)
-
-  // Run all solvers with all methods
-  for( const auto &method : solving_methods )
+  for( const auto &r : results )
   {
-    for( const auto &solver : solvers )
-    {
-      aggregator.reset();
-      auto   start_time = std::chrono::high_resolution_clock::now();
-      double cost       = method.second( aggregator, solver.second, max_outer, params );
-      auto   end_time   = std::chrono::high_resolution_clock::now();
-      double time_ms    = std::chrono::duration<double, std::milli>( end_time - start_time ).count();
-
-      results[method.first][solver.first] = { cost, time_ms };
-    }
+    std::cout << std::setw( 40 ) << std::left << r.name << std::setw( 15 ) << r.cost << std::setw( 15 ) << r.time_ms << "\n";
   }
 
-  // **Find min/max for both cost and time**
-  double min_cost = std::numeric_limits<double>::max();
-  double max_cost = std::numeric_limits<double>::lowest();
-  double min_time = std::numeric_limits<double>::max();
-  double max_time = std::numeric_limits<double>::lowest();
-
-  for( const auto &method : results )
-  {
-    for( const auto &solver : method.second )
-    {
-      double cost    = solver.second.first;
-      double time_ms = solver.second.second;
-      if( cost < min_cost )
-        min_cost = cost;
-      if( cost > max_cost )
-        max_cost = cost;
-      if( time_ms < min_time )
-        min_time = time_ms;
-      if( time_ms > max_time )
-        max_time = time_ms;
-    }
-  }
-
-  // **Formatted Output Table**
-  std::cout << std::endl << "\n\n<<<<<<<  num agents  " << num_agents << "    horizon steps " << time_steps << std::endl;
-  std::cout << "========================================================================================" << std::endl;
-  std::cout << std::setw( 40 ) << "Outer Method" << std::setw( 20 ) << "Solver" << std::setw( 20 ) << "Time (ms)" << std::setw( 20 )
-            << "Cost" << std::endl;
-  std::cout << "========================================================================================\n";
-
-  for( const auto &method : results )
-  {
-    for( const auto &solver : method.second )
-    {
-      double cost    = solver.second.first;
-      double time_ms = solver.second.second;
-
-      // **Apply color coding**
-      std::string cost_color = RESET;
-      std::string time_color = RESET;
-
-      if( cost < 0.1 * ( max_cost - min_cost ) + min_cost )
-        cost_color = GREEN; // Best cost 🟩
-      else if( cost < 0.5 * ( max_cost - min_cost ) + min_cost )
-        cost_color = YELLOW; // Mid-range 🟨
-      else
-        cost_color = RED; // Worst cost 🟥
-
-      if( std::log( time_ms ) < 0.2 * std::log( max_time - min_time ) + std::log( min_time ) )
-        time_color = GREEN; // Fastest 🟩
-      else if( std::log( time_ms ) < 0.5 * std::log( max_time - min_time ) + std::log( min_time ) )
-        time_color = YELLOW; // Mid-range 🟨
-      else
-        time_color = RED; // Slowest 🟥
-
-      std::cout << std::setw( 40 ) << method.first << std::setw( 20 ) << solver.first << time_color // Apply time color
-                << std::setw( 20 ) << std::fixed << std::setprecision( 2 ) << time_ms << RESET      // Reset color
-                << cost_color                                                                       // Apply cost color
-                << std::setw( 20 ) << std::fixed << std::setprecision( 4 ) << cost << RESET         // Reset color
-                << "\n";
-    }
-  }
-
-  std::cout << "=======================================================================================\n";
+  return 0;
 }

@@ -8,6 +8,9 @@
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/types.hpp"
 
+namespace mas
+{
+
 //================================================================
 // Finite Differences for the Overall Trajectory Cost
 //================================================================
@@ -224,3 +227,4 @@ compute_cost_cross_term( const StageCostFunction& stage_cost, const State& x, co
   }
   return H;
 }
+} // namespace mas

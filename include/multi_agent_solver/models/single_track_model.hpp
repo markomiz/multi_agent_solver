@@ -16,7 +16,11 @@
  * Controls (u):
  *   u(0) = delta [rad]  - Steering angle
  *   u(1) = a     [m/s²] - Acceleration
+ *
+ *
  */
+namespace mas
+{
 inline StateDerivative
 single_track_model( const State& x, const Control& u )
 {
@@ -81,3 +85,4 @@ single_track_control_jacobian( const State& x, const Control& u )
 
   return B;
 }
+} // namespace mas

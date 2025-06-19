@@ -50,6 +50,8 @@ public:
     solver->settings()->setVerbosity( false );
     solver->settings()->setAdaptiveRho( true );
     solver->settings()->setMaxIteration( 1000 );
+    solver->settings()->setScaling( 10 );
+    solver->settings()->setPolish( true );
   }
 
   //--------------------------------------------------------------------//

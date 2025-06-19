@@ -127,7 +127,7 @@ public:
       x_trial.col( 0 ) = problem.initial_state;
 
       double            alpha     = 1.0;
-      const double      amin      = 1e-7;
+      const double      amin      = 1e-3;
       double            best_cost = cost;
       StateTrajectory   best_x    = x;
       ControlTrajectory best_u    = u;

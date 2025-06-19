@@ -24,13 +24,13 @@ create_single_track_lane_following_ocp()
 
   // Initial state: for example, X=1, Y=1, psi=1, vx=1
   problem.initial_state = Eigen::VectorXd::Zero( problem.state_dim );
-  problem.initial_state << 0.0, 5.0, 0.0, 0.0;
+  problem.initial_state << 0.0, 1.0, 0.0, 0.0;
 
   // Dynamics: use the dynamic_bicycle_model defined in your code.
   problem.dynamics = single_track_model;
 
   // Desired velocity.
-  const double desired_velocity = 5.0; // [m/s]
+  const double desired_velocity = 1.0; // [m/s]
 
   // Cost weights.
   const double w_lane  = 1.0; // Penalize lateral deviation.
@@ -125,7 +125,7 @@ main( int /*argc*/, char** /*argv*/ )
   OCP problem = create_single_track_lane_following_ocp();
 
   SolverParams params;
-  params["max_iterations"] = 2;
+  params["max_iterations"] = 10;
   params["tolerance"]      = 1e-5;
   params["max_ms"]         = 100;
   // params["debug"]       = 1.0;   // uncomment for verbose output
@@ -135,6 +135,7 @@ main( int /*argc*/, char** /*argv*/ )
   solvers.emplace( "iLQR", iLQR() );
   solvers.emplace( "CGD", CGD() );
   solvers.emplace( "OSQP", OSQP() );
+  solvers.emplace( "OSQP_collocation", OSQPCollocation() );
 
   struct SolverResult
   {
@@ -150,6 +151,11 @@ main( int /*argc*/, char** /*argv*/ )
     auto start = std::chrono::high_resolution_clock::now();
     mas::set_params( solver, params ); // variant-safe call
     mas::solve( solver, problem );     // variant-safe call
+    // print best states and controls
+    std::cout << "Solver: " << name << "\n";
+    std::cout << "Best states:\n" << problem.best_states << "\n";
+    std::cout << "Best controls:\n" << problem.best_controls << "\n";
+
     auto end = std::chrono::high_resolution_clock::now();
 
     results[name] = { problem.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };

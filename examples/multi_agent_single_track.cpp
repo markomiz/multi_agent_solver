@@ -240,26 +240,32 @@ main()
     results.push_back( { name, aggregator.agent_cost_sum(), elapsed.count() } );
   };
 
-  // Benchmark solvers
-  time_solver( "Centralized iLQR", [&]() { aggregator.solve_centralized<iLQR>( params ); } );
-  time_solver( "Centralized CGD", [&]() { aggregator.solve_centralized<CGD>( params ); } );
-  time_solver( "Centralized OSQP", [&]() { aggregator.solve_centralized<OSQP>( params ); } );
-  time_solver( "Decentralized iLQR (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<iLQR>( max_outer, params ); } );
-  time_solver( "Decentralized iLQR (Line Search)", [&]() { aggregator.solve_decentralized_line_search<iLQR>( max_outer, params ); } );
-  time_solver( "Decentralized CGD (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<CGD>( max_outer, params ); } );
-  time_solver( "Decentralized CGD (Line Search)", [&]() { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
-  time_solver( "Decentralized OSQP (Trust Region)", [&]() { aggregator.solve_decentralized_trust_region<OSQP>( max_outer, params ); } );
-  time_solver( "Decentralized OSQP (Line Search)", [&]() { aggregator.solve_decentralized_line_search<OSQP>( max_outer, params ); } );
+  // Benchmark solvers ---------------------------------------------------------
+  time_solver( "Centralized iLQR", [&] { aggregator.solve_centralized<iLQR>( params ); } );
+  time_solver( "Centralized CGD", [&] { aggregator.solve_centralized<CGD>( params ); } );
+  time_solver( "Centralized OSQP", [&] { aggregator.solve_centralized<OSQP>( params ); } );
+  // time_solver( "Centralized OSQP-Collocation", [&] { aggregator.solve_centralized<OSQPCollocation>( params ); } ); // NEW ⭐
 
-  // Output table
+  // decentralised variants ----------------------------------------------------
+  time_solver( "Decentralized iLQR (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<iLQR>( max_outer, params ); } );
+  time_solver( "Decentralized iLQR (Line Search)", [&] { aggregator.solve_decentralized_line_search<iLQR>( max_outer, params ); } );
+  time_solver( "Decentralized CGD (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<CGD>( max_outer, params ); } );
+  // time_solver( "Decentralized CGD (Line Search)", [&] { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<OSQP>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP (Line Search)", [&] { aggregator.solve_decentralized_line_search<OSQP>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP-Collocation (Trust Region)",
+               [&] { aggregator.solve_decentralized_trust_region<OSQPCollocation>( max_outer, params ); } ); // NEW ⭐
+  // time_solver( "Decentralized OSQP-Collocation (Line Search)",
+  //              [&] { aggregator.solve_decentralized_line_search<OSQPCollocation>( max_outer, params ); } ); // NEW ⭐
+
+  // Output table --------------------------------------------------------------
   std::cout << std::fixed << std::setprecision( 6 ) << "\n";
   std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << "\n";
   std::cout << std::string( 70, '-' ) << "\n";
 
   for( const auto &r : results )
-  {
     std::cout << std::setw( 40 ) << std::left << r.name << std::setw( 15 ) << r.cost << std::setw( 15 ) << r.time_ms << "\n";
-  }
+
 
   return 0;
 }

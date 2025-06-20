@@ -195,41 +195,61 @@ public:
   double
   solve_decentralized_line_search( int max_outer, const SolverParams& params )
   {
-    const double c1 = 1e-4, reduction = 0.5, min_alpha = 1e-3;
-    const double tol = params.at( "tolerance" );
+    const double c1        = 1e-4; // Armijo fraction
+    const double shrink    = 0.5;  // α ← α·shrink
+    const double min_alpha = 1e-3; // stop backtracking here
+    const double tol       = params.at( "tolerance" );
 
-    double                         total_cost = agent_cost_sum();
-    std::vector<ControlTrajectory> blended( agent_blocks.size() );
+    double      total_cost = agent_cost_sum(); // current best
+    std::size_t n          = agent_blocks.size();
 
+    /* -------- outer iterations ----------------------------------- */
     for( int outer = 0; outer < max_outer; ++outer )
     {
-      auto prev_ctrl = backup_controls();
-      solve_all_agents<SolverT>( params );
-      auto new_ctrl   = backup_controls();
-      auto delta_ctrl = compute_control_deltas( prev_ctrl, new_ctrl );
+      /* (1) solve every agent once in parallel ------------------ */
+      auto prev_ctrl = backup_controls();  // U_k
+      solve_all_agents<SolverT>( params ); // produces U_trial
+      auto trial_ctrl = backup_controls(); // U_k + ΔU
+      auto delta_ctrl = compute_control_deltas( prev_ctrl, trial_ctrl );
 
-      double alpha     = 1.0;
-      double best_cost = total_cost;
-      while( alpha > min_alpha )
+      /* (2) line search *per agent* ----------------------------- */
+      std::vector<ControlTrajectory> best_ctrl = prev_ctrl;
+      double                         best_cost = total_cost;
+
+      for( std::size_t i = 0; i < n; ++i )
       {
-        for( std::size_t i = 0; i < blended.size(); ++i )
-          blended[i] = prev_ctrl[i] + alpha * delta_ctrl[i];
-        apply_control_updates( blended );
-        double new_cost = agent_cost_sum();
-        double pred     = ( total_cost - new_cost ) * c1;
-        if( new_cost < total_cost + alpha * pred )
+        double alpha = 1.0;
+        while( alpha >= min_alpha )
         {
-          best_cost = new_cost;
-          break;
+          ControlTrajectory blended = prev_ctrl[i] + alpha * delta_ctrl[i];
+
+          /* write into agent i only ------------------------ */
+          auto& ocp = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls.resize( blended.rows(), blended.cols() );
+          ocp.best_controls = blended;
+          ocp.best_states   = integrate_horizon( ocp.initial_state, blended, ocp.dt, ocp.dynamics, integrate_rk4 );
+
+          double new_cost  = agent_cost_sum(); // global
+          double predicted = -c1 * alpha *     // Armijo
+                             ( total_cost - ocp.best_cost );
+          if( new_cost <= total_cost + predicted )
+          {
+            best_ctrl[i] = blended; // accept
+            best_cost    = new_cost;
+            break;
+          }
+          alpha *= shrink; // back-track
         }
-        alpha *= reduction;
       }
-      if( alpha < min_alpha )
-        apply_control_updates( prev_ctrl );
-      if( total_cost > best_cost + tol )
-        total_cost = best_cost;
-      else
-        break;
+
+      /* (3) apply accepted updates ------------------------------ */
+      apply_control_updates( best_ctrl );
+      double new_total = agent_cost_sum();
+
+      if( total_cost - new_total < tol ) // no significant progress
+        return new_total;
+
+      total_cost = new_total; // continue outer loop
     }
     return total_cost;
   }
@@ -237,6 +257,7 @@ public:
   //---------------------------------------------------------------------
   void
   reset()
+
   {
     for( auto& blk : agent_blocks )
       blk.ocp_ptr->reset();

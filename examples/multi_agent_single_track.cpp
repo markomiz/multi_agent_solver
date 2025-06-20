@@ -140,57 +140,6 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   return problem;
 }
 
-/*────────────────────────────  type lists  ────────────────────────────*/
-using SolverList = std::tuple<mas::iLQR, mas::OSQP, mas::CGD>;
-
-enum class Method
-{
-  Centralized,
-  Simple,
-  LineSearch,
-  TrustRegion
-};
-constexpr std::array all_methods = { Method::Centralized, Method::Simple, Method::LineSearch, Method::TrustRegion };
-
-constexpr std::string_view
-method_name( Method m )
-{
-  switch( m )
-  {
-    case Method::Centralized:
-      return "Centralized";
-    case Method::Simple:
-      return "Decentralized Simple";
-    case Method::LineSearch:
-      return "Decentralized Line Search";
-    default:
-      return "Decentralized Trust Region";
-  }
-}
-
-/*────────────────────  run one <method,solver>  ───────────────────────*/
-template<Method M, typename SolverT>
-double
-run_method( mas::MultiAgentAggregator &agg, int max_outer, const mas::SolverParams &p )
-{
-  if constexpr( M == Method::Centralized )
-    return agg.solve_centralized<SolverT>( p );
-
-  else if constexpr( M == Method::Simple )
-    return agg.solve_decentralized_simple<SolverT>( max_outer, p );
-
-  else if constexpr( M == Method::LineSearch )
-    return agg.solve_decentralized_line_search<SolverT>( max_outer, p );
-
-  else /* TrustRegion */
-    return agg.solve_decentralized_trust_region<SolverT>( max_outer, p );
-}
-
-/*─────────────────────────  user OCP builder  ─────────────────────────*/
-// (same as before) create_single_track_circular_ocp(...)
-
-/*────────────────────────────────  main  ──────────────────────────────*/
-
 struct Result
 {
   std::string name;
@@ -225,7 +174,7 @@ main()
   SolverParams params{
     { "max_iterations",    2 },
     {      "tolerance", 1e-5 },
-    {         "max_ms",  100 }
+    {         "max_ms", 1000 }
   };
   constexpr int max_outer = 50;
 
@@ -244,28 +193,52 @@ main()
   time_solver( "Centralized iLQR", [&] { aggregator.solve_centralized<iLQR>( params ); } );
   time_solver( "Centralized CGD", [&] { aggregator.solve_centralized<CGD>( params ); } );
   time_solver( "Centralized OSQP", [&] { aggregator.solve_centralized<OSQP>( params ); } );
-  // time_solver( "Centralized OSQP-Collocation", [&] { aggregator.solve_centralized<OSQPCollocation>( params ); } ); // NEW ⭐
+  time_solver( "Centralized OSQPcol", [&] { aggregator.solve_centralized<OSQPCollocation>( params ); } );
 
   // decentralised variants ----------------------------------------------------
   time_solver( "Decentralized iLQR (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<iLQR>( max_outer, params ); } );
   time_solver( "Decentralized iLQR (Line Search)", [&] { aggregator.solve_decentralized_line_search<iLQR>( max_outer, params ); } );
   time_solver( "Decentralized CGD (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<CGD>( max_outer, params ); } );
-  // time_solver( "Decentralized CGD (Line Search)", [&] { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
+  time_solver( "Decntralized CGD (Line Search)", [&] { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
   time_solver( "Decentralized OSQP (Trust Region)", [&] { aggregator.solve_decentralized_trust_region<OSQP>( max_outer, params ); } );
   time_solver( "Decentralized OSQP (Line Search)", [&] { aggregator.solve_decentralized_line_search<OSQP>( max_outer, params ); } );
-  time_solver( "Decentralized OSQP-Collocation (Trust Region)",
-               [&] { aggregator.solve_decentralized_trust_region<OSQPCollocation>( max_outer, params ); } ); // NEW ⭐
-  // time_solver( "Decentralized OSQP-Collocation (Line Search)",
-  //              [&] { aggregator.solve_decentralized_line_search<OSQPCollocation>( max_outer, params ); } ); // NEW ⭐
+  time_solver( "Decentralized OSQPcol (Trust Region)",
+               [&] { aggregator.solve_decentralized_trust_region<OSQPCollocation>( max_outer, params ); } );
+  time_solver( "Decentralized OSQPcol (Line Search)",
+               [&] { aggregator.solve_decentralized_line_search<OSQPCollocation>( max_outer, params ); } );
 
-  // Output table --------------------------------------------------------------
-  std::cout << std::fixed << std::setprecision( 6 ) << "\n";
-  std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << "\n";
-  std::cout << std::string( 70, '-' ) << "\n";
+
+  /* ------------------------------------------------------------------ */
+  /*  Pretty table with colours                                          */
+  /* ------------------------------------------------------------------ */
+  namespace pc = print_color; // alias
+
+  auto best_cost = std::min_element( results.begin(), results.end(), []( auto &a, auto &b ) { return a.cost < b.cost; } )->cost;
+  auto best_time = std::min_element( results.begin(), results.end(), []( auto &a, auto &b ) { return a.time_ms < b.time_ms; } )->time_ms;
+
+  /* helper: choose colour -------------------------------------------------- */
+  auto colour = []( double val, double best, bool lower_is_better = true ) {
+    double ratio = lower_is_better ? val / best : best / val;
+    if( ratio <= 1.1 )
+      return pc::green; // ≤5 % from best
+    else if( ratio <= 2.0 )
+      return pc::yellow; // within 30 %
+    else
+      return pc::red; // worse
+  };
+
+  std::cout << "Multi-Agent Single Track OCP Benchmark\n";
+  std::cout << "---------------------------------------\n";
+  std::cout << "Number of agents: " << num_agents << ", Time steps: " << time_steps << '\n';
+
+  std::cout << '\n' << std::fixed << std::setprecision( 6 );
+  std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << '\n'
+            << std::string( 70, '-' ) << '\n';
 
   for( const auto &r : results )
-    std::cout << std::setw( 40 ) << std::left << r.name << std::setw( 15 ) << r.cost << std::setw( 15 ) << r.time_ms << "\n";
-
-
+  {
+    std::cout << std::setw( 40 ) << std::left << r.name << colour( r.cost, best_cost ) << std::setw( 15 ) << r.cost << pc::reset
+              << colour( r.time_ms, best_time ) << std::setw( 15 ) << r.time_ms << pc::reset << '\n';
+  }
   return 0;
 }

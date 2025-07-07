@@ -37,6 +37,11 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
   double alpha    = initial_step_size;
   double cost_ref = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
 
+  // The search direction is the negative gradient, so grad^T * (-grad)
+  // should be negative. The Armijo condition expects f(x + alpha p)
+  // <= f(x) + c1 * alpha * grad^T p. With p = -gradients this becomes
+  // cost_ref + c1 * alpha * directional_derivative where
+  // directional_derivative = grad^T * (-grad).
   double directional_derivative = gradients.cwiseProduct( -gradients ).sum();
 
   while( true )
@@ -46,8 +51,10 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
     StateTrajectory   trial_trajectory = integrate_horizon( initial_state, trial_controls, dt, dynamics, integrate_rk4 );
     double            trial_cost       = objective_function( trial_trajectory, trial_controls );
 
-    // Check Armijo condition
-    if( trial_cost <= cost_ref - c1 * alpha * directional_derivative )
+    // Check Armijo condition. directional_derivative is negative, so the
+    // right-hand side is less than cost_ref when a descent direction is
+    // used.
+    if( trial_cost <= cost_ref + c1 * alpha * directional_derivative )
     {
       break;
     }

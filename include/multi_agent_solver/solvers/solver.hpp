@@ -30,4 +30,11 @@ set_params( Solver& solver, const SolverParams& params )
   std::visit( [&]( auto& s ) { s.set_params( params ); }, solver );
 }
 
+template<typename SolverT>
+std::shared_ptr<Solver>
+create()
+{
+  return std::make_shared<Solver>( std::in_place_type<SolverT> );
+}
+
 } // namespace mas

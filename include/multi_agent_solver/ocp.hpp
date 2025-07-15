@@ -77,11 +77,14 @@ struct OCP
   void
   reset()
   {
+    std::cerr << "resetting OCP" << std::endl;
     initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
     initial_states   = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
-    best_controls    = initial_controls;
-    best_states      = initial_states;
-    best_cost        = std::numeric_limits<double>::max();
+
+    best_states   = initial_states;
+    best_controls = initial_controls;
+
+    best_cost = objective_function( initial_states, initial_controls );
   }
 
   void
@@ -103,6 +106,7 @@ struct OCP
 
     best_states   = initial_states;
     best_controls = initial_controls;
+
 
     // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )
@@ -129,6 +133,7 @@ struct OCP
         return compute_trajectory_cost( states, controls, stage_cost_local, terminal_cost_local );
       };
     }
+    best_cost = objective_function( initial_states, initial_controls );
   }
 
   // Verify that the problem's dimensions and outputs are consistent
@@ -184,4 +189,4 @@ struct OCP
     return true;
   }
 };
-}
+} // namespace mas

@@ -125,7 +125,9 @@ public:
       if( elapsed_ms > max_ms )
       {
         if( debug )
-          std::cerr << "OSQP solver stopped: time limit \n";
+        {
+          std::cerr << "OSQP-collocation finished in " << elapsed_ms << " ms,  cost = " << problem.best_cost << '\n';
+        }
         break;
       }
 
@@ -177,6 +179,8 @@ public:
         controls = u_new;
         states   = states_new;
         cost     = cost_new;
+        if( debug )
+          std::cerr << "OSQP converged in " << iter + 1 << " SQP steps\n";
         break;
       }
       if( cost_new < cost )
@@ -186,7 +190,11 @@ public:
         cost     = cost_new;
       }
       else
+      {
+        if( debug )
+          std::cerr << "OSQP converged in " << iter + 1 << " SQP steps\n";
         break;
+      }
     }
   }
 

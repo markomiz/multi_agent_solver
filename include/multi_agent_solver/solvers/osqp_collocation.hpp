@@ -91,7 +91,7 @@ OSQPCollocation::set_params( const SolverParams& p )
   tolerance = p.at( "tolerance" );
   debug     = p.count( "debug" ) && p.at( "debug" ) > 0.5;
   max_ms    = p.count( "max_ms" ) ? p.at( "max_ms" ) : 1000.0;
-  solver->settings()->setVerbosity( debug );
+  solver->settings()->setVerbosity( false );
   solver->settings()->setWarmStart( true );
   solver->settings()->setAdaptiveRho( true );
   solver->settings()->setScaling( 10 );
@@ -216,56 +216,76 @@ OSQPCollocation::prepare_structure( const OCP& p )
   structure_ready = true;
 }
 
-/* ---------- phase 2: overwrite numeric values -------------------- */
 inline void
 OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const ControlTrajectory& U, double reg )
 {
-  /* ---------- gradient (stage cost) ----------------------------- */
   qp.g.setZero();
   for( int t = 1; t <= T; ++t )
     qp.g.segment( id_state( t, 0, nx ), nx ) = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
   for( int t = 0; t < T; ++t )
     qp.g.segment( id_control( t, nx, nu, T ), nu ) = p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
 
-  /* ---------- Hessian values ------------------------------------ */
   double*     h_val = qp.H.valuePtr();
   std::size_t kH    = 0;
 
-  /* Q – state terms */
   for( int t = 1; t <= T; ++t )
   {
-    const auto Q = p.cost_state_hessian( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
+    auto Q = p.cost_state_hessian( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
+    if( !Q.allFinite() )
+      std::cerr << "[Warning] Non-finite Q at t=" << t << "\n";
+
+    double min_diag = Q.diagonal().minCoeff();
+    if( min_diag + reg < 0.0 )
+    {
+      double lambda         = std::abs( min_diag ) + reg;
+      Q.diagonal().array() += lambda;
+    }
+
     for( int i = 0; i < nx; ++i )
-      h_val[H_idx[kH++]] = Q( i, i ) + reg;
+      h_val[H_idx[kH++]] = Q( i, i );
   }
-  /* R – control terms */
+
   for( int t = 0; t < T; ++t )
   {
-    const auto R = p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
+    auto R = p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
+    if( !R.allFinite() )
+      std::cerr << "[Warning] Non-finite R at t=" << t << "\n";
+
+    double min_diag = R.diagonal().minCoeff();
+    if( min_diag + reg < 0.0 )
+    {
+      double lambda         = std::abs( min_diag ) + reg;
+      R.diagonal().array() += lambda;
+    }
+
     for( int i = 0; i < nu; ++i )
-      h_val[H_idx[kH++]] = R( i, i ) + reg;
+      h_val[H_idx[kH++]] = R( i, i );
   }
-  /* reg anywhere else */
+
   for( ; kH < H_idx.size(); ++kH )
     h_val[H_idx[kH]] = reg;
 
-  /* ---------- dynamics rows ------------------------------------- */
   double*     a_val = qp.A.valuePtr();
   std::size_t kA    = 0;
 
   for( int t = 0; t < T; ++t )
   {
-    const int row0 = t * nx;
-
+    const int  row0  = t * nx;
     const auto x_t   = X.col( t );
     const auto u_t   = U.col( t );
     const auto x_tp1 = X.col( t + 1 );
     const auto u_tp1 = ( t + 1 < T ) ? U.col( t + 1 ) : U.col( T - 1 );
 
+    if( !x_t.allFinite() || !u_t.allFinite() )
+      std::cerr << "[Warning] Non-finite dynamics at t=" << t << "\n";
+
     const auto Fx_t   = p.dynamics_state_jacobian( p.dynamics, x_t, u_t );
     const auto Fu_t   = p.dynamics_control_jacobian( p.dynamics, x_t, u_t );
     const auto Fx_tp1 = p.dynamics_state_jacobian( p.dynamics, x_tp1, u_tp1 );
     const auto Fu_tp1 = p.dynamics_control_jacobian( p.dynamics, x_tp1, u_tp1 );
+
+    if( !Fx_t.allFinite() || !Fu_t.allFinite() || !Fx_tp1.allFinite() || !Fu_tp1.allFinite() )
+      std::cerr << "[Warning] Non-finite Jacobians at t=" << t << "\n";
 
     const auto f_t   = p.dynamics( x_t, u_t );
     const auto f_tp1 = p.dynamics( x_tp1, u_tp1 );
@@ -276,26 +296,22 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 
     for( int i = 0; i < nx; ++i )
     {
-      /* δx_{t+1} */
       for( int j = 0; j < nx; ++j )
         qp.A.coeffRef( row0 + i, id_state( t + 1, j, nx ) ) = ( i == j ? 1.0 : 0.0 ) - 0.5 * p.dt * Fx_tp1( i, j );
 
-      if( t > 0 ) /* δx_t */
+      if( t > 0 )
         for( int j = 0; j < nx; ++j )
           qp.A.coeffRef( row0 + i, id_state( t, j, nx ) ) = -( i == j ? 1.0 : 0.0 ) - 0.5 * p.dt * Fx_t( i, j );
 
-      /* δu_t */
       for( int j = 0; j < nu; ++j )
         qp.A.coeffRef( row0 + i, id_control( t, nx, nu, T ) + j ) = -0.5 * p.dt * Fu_t( i, j );
 
-      if( t + 1 < T ) /* δu_{t+1} */
+      if( t + 1 < T )
         for( int j = 0; j < nu; ++j )
           qp.A.coeffRef( row0 + i, id_control( t + 1, nx, nu, T ) + j ) = -0.5 * p.dt * Fu_tp1( i, j );
     }
   }
-  assert( kA == A_dyn_idx.size() );
 
-  /* ---------- bound rows ---------------------------------------- */
   const int sb_off = n_dyn;
   const int cb_off = n_dyn + n_state_bnd_;
 
@@ -309,6 +325,7 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
       qp.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds - xr )( i ) : OsqpEigen::INFTY;
     }
   }
+
   for( int t = 0; t < T; ++t )
   {
     const auto ur = U.col( t );
@@ -320,11 +337,18 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
     }
   }
 
-  /* ---------- push numbers into OSQP ---------------------------- */
-  solver->updateHessianMatrix( qp.H ); // value update only
+  if( !qp.H.isCompressed() )
+    std::cerr << "[Warning] Hessian matrix is not compressed\n";
+  if( !qp.A.isCompressed() )
+    std::cerr << "[Warning] Constraint matrix is not compressed\n";
+  if( !qp.g.allFinite() )
+    std::cerr << "[Warning] Gradient vector contains non-finite values\n";
+  if( !qp.lb.allFinite() || !qp.ub.allFinite() )
+    std::cerr << "[Warning] Bound vectors contain non-finite values\n";
+
+  solver->updateHessianMatrix( qp.H );
   solver->updateGradient( qp.g );
   solver->updateLinearConstraintsMatrix( qp.A );
-  /* single atomic bounds update – prevents intermediate l>u */
   if( !solver->updateBounds( qp.lb, qp.ub ) )
     throw std::runtime_error( "OSQP bounds update failed" );
 }
@@ -363,7 +387,7 @@ OSQPCollocation::solve( OCP& problem )
     if( clk::now() >= deadline )
     {
       if( debug )
-        std::cerr << "SQP stopped by time-out after " << it << " iterations\n";
+        std::cerr << "OSQP Collocation stopped by time-out after " << it << " iterations\n";
       break; // keep best-so-far
     }
 
@@ -386,7 +410,7 @@ OSQPCollocation::solve( OCP& problem )
     if( std::sqrt( step_norm2 ) < tolerance )
     {
       if( debug )
-        std::cerr << "✔ converged in " << it + 1 << " SQP steps\n";
+        std::cerr << "OSQP Collocation  converged in " << it + 1 << " SQP steps\n";
       break;
     }
   }

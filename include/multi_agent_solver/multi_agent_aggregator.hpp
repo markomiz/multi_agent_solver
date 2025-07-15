@@ -14,19 +14,22 @@
 
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
 namespace mas
 {
 
+
 struct AgentBlockInfo
 {
-  std::size_t          agent_id;
-  int                  state_offset;
-  int                  control_offset;
-  int                  state_dim;
-  int                  control_dim;
-  std::shared_ptr<OCP> ocp_ptr;
+  std::size_t             agent_id;
+  int                     state_offset;
+  int                     control_offset;
+  int                     state_dim;
+  int                     control_dim;
+  std::shared_ptr<OCP>    ocp_ptr;
+  std::shared_ptr<Solver> solver; // one per agent, lives forever
 };
 
 class MultiAgentAggregator
@@ -54,6 +57,17 @@ public:
       agent_blocks.push_back( { id, s_off, u_off, ocp->state_dim, ocp->control_dim, ocp } );
       s_off += ocp->state_dim;
       u_off += ocp->control_dim;
+    }
+  }
+
+  template<typename SolverT>
+  void
+  initialize_solvers( const SolverParams& p )
+  {
+    for( auto& blk : agent_blocks )
+    {
+      blk.solver = create<SolverT>();
+      set_params( *blk.solver, p );
     }
   }
 
@@ -90,15 +104,15 @@ public:
   solve_all_agents( const SolverParams& params )
   {
 #pragma omp parallel for
-    for( std::size_t i = 0; i < agent_blocks.size(); ++i )
+    for( size_t i = 0; i < agent_blocks.size(); ++i )
     {
-      SolverT solver; // local instance per thread / agent
-      solver.set_params( params );
-      solver.solve( *agent_blocks[i].ocp_ptr );
+      solve( *agent_blocks[i].solver, *agent_blocks[i].ocp_ptr );
     }
 #pragma omp parallel for
-    for( std::size_t i = 0; i < agent_blocks.size(); ++i )
+    for( size_t i = 0; i < agent_blocks.size(); ++i )
+    {
       agent_blocks[i].ocp_ptr->update_initial_with_best();
+    }
   }
 
   //---------------------------------------------------------------------
@@ -108,8 +122,9 @@ public:
   double
   solve_decentralized_simple( int max_outer, const SolverParams& params )
   {
-    double       total_cost = std::numeric_limits<double>::max();
+    double       total_cost = agent_cost_sum();
     const double tol        = params.at( "tolerance" );
+    initialize_solvers<SolverT>( params );
 
     for( int k = 0; k < max_outer; ++k )
     {
@@ -127,6 +142,8 @@ public:
   double
   solve_decentralized_trust_region( int max_outer, const SolverParams& params )
   {
+    initialize_solvers<SolverT>( params );
+
     const double tol = params.at( "tolerance" );
     std::size_t  n   = agent_blocks.size();
 
@@ -185,8 +202,10 @@ public:
         restore_controls( prev_ctrl );
       else
         total_cost = new_total;
-      if( total_cost > best_cost - tol )
-        break;
+      // if( total_cost > best_cost - tol )
+      //   break;
+
+      std::cerr << "outer loop : " << outer << std::endl;
     }
     return total_cost;
   }
@@ -195,9 +214,12 @@ public:
   double
   solve_decentralized_line_search( int max_outer, const SolverParams& params )
   {
+    initialize_solvers<SolverT>( params );
+
+
     const double c1        = 1e-4; // Armijo fraction
     const double shrink    = 0.5;  // α ← α·shrink
-    const double min_alpha = 1e-3; // stop backtracking here
+    const double min_alpha = 1e-5; // stop backtracking here
     const double tol       = params.at( "tolerance" );
 
     double      total_cost = agent_cost_sum(); // current best
@@ -224,8 +246,7 @@ public:
           ControlTrajectory blended = prev_ctrl[i] + alpha * delta_ctrl[i];
 
           /* write into agent i only ------------------------ */
-          auto& ocp = *agent_blocks[i].ocp_ptr;
-          ocp.best_controls.resize( blended.rows(), blended.cols() );
+          auto& ocp         = *agent_blocks[i].ocp_ptr;
           ocp.best_controls = blended;
           ocp.best_states   = integrate_horizon( ocp.initial_state, blended, ocp.dt, ocp.dynamics, integrate_rk4 );
 
@@ -257,7 +278,6 @@ public:
   //---------------------------------------------------------------------
   void
   reset()
-
   {
     for( auto& blk : agent_blocks )
       blk.ocp_ptr->reset();
@@ -308,9 +328,11 @@ public:
   {
     for( size_t i = 0; i < agent_blocks.size(); ++i )
     {
-      auto& ocp         = *agent_blocks[i].ocp_ptr;
-      ocp.best_controls = controls[i];
-      ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
+      auto ocp_ptr           = agent_blocks[i].ocp_ptr;
+      ocp_ptr->best_controls = controls[i];
+      ocp_ptr->best_states   = integrate_horizon( ocp_ptr->initial_state, ocp_ptr->best_controls, ocp_ptr->dt, ocp_ptr->dynamics,
+                                                  integrate_rk4 );
+      ocp_ptr->update_initial_with_best();
     }
   }
 

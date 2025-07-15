@@ -56,12 +56,14 @@ public:
     StateTrajectory&   x    = problem.best_states;
     ControlTrajectory& u    = problem.best_controls;
     double&            cost = problem.best_cost;
+    if( debug )
+      std::cerr << "1 initial cost: " << cost << '\n';
 
     // ---------- initial rollout & cost ----------------------------------
     x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
     cost = problem.objective_function( x, u );
     if( debug )
-      std::cerr << "initial cost: " << cost << '\n';
+      std::cerr << "2 initial cost: " << cost << '\n';
 
     // ------------------------ main loop ---------------------------------
     for( int iter = 0; iter < max_iterations; ++iter )
@@ -158,7 +160,7 @@ public:
 
       const double improvement = cost - best_cost;
       if( debug )
-        std::cerr << "iter " << iter << ": cost=" << best_cost << ", Δ=" << improvement << '\n';
+        std::cerr << "iLQR iter " << iter << ": cost=" << best_cost << ", Δ=" << improvement << '\n';
 
       x    = best_x;
       u    = best_u;
@@ -169,7 +171,7 @@ public:
         if( debug )
         {
           const double total_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
-          std::cerr << "converged in " << total_ms << " ms\n";
+          std::cerr << "iLQR converged in " << total_ms << " ms\n";
         }
         break;
       }

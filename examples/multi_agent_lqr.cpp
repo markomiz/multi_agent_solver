@@ -75,7 +75,7 @@ main()
     {      "tolerance", 1e-5 },
     {         "max_ms",  100 }
   };
-  constexpr int max_outer = 1;
+  constexpr int max_outer = 10;
 
   std::vector<Result> results;
 

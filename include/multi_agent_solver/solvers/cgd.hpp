@@ -36,6 +36,7 @@ public:
     tolerance      = params.at( "tolerance" );
     max_ms         = params.at( "max_ms" );
     penalty_param  = 1.0;
+    debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
   }
 
   /**
@@ -64,7 +65,7 @@ public:
     {
       const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start_time ).count();
 
-      if( elapsed_ms > max_ms )
+      if( elapsed_ms > max_ms && debug )
       {
         std::cout << "CGD solver terminated early: " << elapsed_ms << " ms > " << max_ms << " ms\n";
         break;
@@ -101,7 +102,10 @@ public:
       increase_penalty_parameter( penalty_param, problem, state_trajectory, controls, tolerance );
 
       if( std::abs( old_cost - trial_cost ) < tolerance )
+      {
+        std::cout << "CGD solver converged in " << iter << "steps" << std::endl;
         break;
+      }
     }
   }
 
@@ -134,6 +138,7 @@ private:
   int    max_iterations;
   double tolerance;
   double max_ms;
+  bool   debug = false;
 
   ConstraintViolations eq_multipliers;
   ConstraintViolations ineq_multipliers;

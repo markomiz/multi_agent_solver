@@ -7,14 +7,13 @@
 #include "multi_agent_solver/models/single_track_model.hpp"
 #include "multi_agent_solver/multi_agent_aggregator.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/cgd.hpp"
-#include "multi_agent_solver/solvers/ilqr.hpp"
-#include "multi_agent_solver/solvers/osqp_solver.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
-OCP
+mas::OCP
 create_single_track_lane_following_ocp()
 {
+  using namespace mas;
   OCP problem;
 
   // Dimensions
@@ -25,13 +24,13 @@ create_single_track_lane_following_ocp()
 
   // Initial state: for example, X=1, Y=1, psi=1, vx=1
   problem.initial_state = Eigen::VectorXd::Zero( problem.state_dim );
-  problem.initial_state << 0.0, 5.0, 0.0, 0.0;
+  problem.initial_state << 0.0, 1.0, 0.0, 0.0;
 
   // Dynamics: use the dynamic_bicycle_model defined in your code.
   problem.dynamics = single_track_model;
 
   // Desired velocity.
-  const double desired_velocity = 5.0; // [m/s]
+  const double desired_velocity = 1.0; // [m/s]
 
   // Cost weights.
   const double w_lane  = 1.0; // Penalize lateral deviation.
@@ -118,62 +117,64 @@ create_single_track_lane_following_ocp()
 }
 
 int
-main( int /*num_arguments*/, char** /*arguments*/ )
+main( int /*argc*/, char** /*argv*/ )
 {
-  // Build the lane-following OCP.
+  using namespace mas;
+
+  // Build the lane-following OCP
   OCP problem = create_single_track_lane_following_ocp();
 
   SolverParams params;
-  params["max_iterations"] = 2;
+  params["max_iterations"] = 10;
   params["tolerance"]      = 1e-5;
   params["max_ms"]         = 100;
+  // params["debug"]       = 1.0;   // uncomment for verbose output
 
-
-  // Define solvers in a map
-  std::map<std::string, Solver> solvers = {
-    { "iLQR", ilqr_solver },
-    {  "CGD",  cgd_solver },
-    { "OSQP", osqp_solver }
-  };
+  /*----------------  instantiate concrete solvers  ---------------*/
+  std::map<std::string, Solver> solvers;
+  solvers.emplace( "iLQR", iLQR() );
+  solvers.emplace( "CGD", CGD() );
+  solvers.emplace( "OSQP", OSQP() );
+  solvers.emplace( "OSQP_collocation", OSQPCollocation() );
 
   struct SolverResult
   {
     double cost;
-    double time;
+    double time_ms;
   };
 
   std::map<std::string, SolverResult> results;
 
-  // Run solvers
-  for( const auto& [name, solver] : solvers )
+  /*---------------------  run each solver  ------------------------*/
+  for( auto& [name, solver] : solvers )
   {
     auto start = std::chrono::high_resolution_clock::now();
-    solver( problem, params );
+    mas::set_params( solver, params ); // variant-safe call
+    mas::solve( solver, problem );     // variant-safe call
+    // print best states and controls
+    std::cout << "Solver: " << name << "\n";
+    std::cout << "Best states:\n" << problem.best_states << "\n";
+    std::cout << "Best controls:\n" << problem.best_controls << "\n";
+
     auto end = std::chrono::high_resolution_clock::now();
 
     results[name] = { problem.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
 
-    problem.reset();
+    problem.reset(); // ready for next solver
   }
 
-  // Find best and worst values
+  /*---------------------  pretty print  ---------------------------*/
   auto [min_cost, max_cost] = std::minmax_element( results.begin(), results.end(),
                                                    []( const auto& a, const auto& b ) { return a.second.cost < b.second.cost; } );
 
   auto [min_time, max_time] = std::minmax_element( results.begin(), results.end(),
-                                                   []( const auto& a, const auto& b ) { return a.second.time < b.second.time; } );
+                                                   []( const auto& a, const auto& b ) { return a.second.time_ms < b.second.time_ms; } );
 
-  // Print structured results
-  std::cerr << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
-  std::cout << "🚗 Single-Track Lane Following Test 🚗\n";
-  std::cout << "-----------------------------------\n";
-  std::cout << std::left << std::setw( 25 ) << "Solver" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)\n";
-  std::cout << "---------------------------------------------\n";
+  std::cout << "\n🚗 Single-Track Lane Following Test 🚗\n"
+            << "---------------------------------------------\n"
+            << std::left << std::setw( 20 ) << "Solver" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)\n"
+            << "---------------------------------------------\n";
 
-  for( const auto& [name, result] : results )
-  {
-    std::cout << std::left << std::setw( 25 ) << name << std::setw( 15 ) << result.cost << std::setw( 15 ) << result.time << "\n";
-  }
-
-  std::cout << "\n\n\n++++++++++++++++++++++++++++++++" << std::endl;
+  for( const auto& [name, res] : results )
+    std::cout << std::left << std::setw( 20 ) << name << std::setw( 15 ) << res.cost << std::setw( 15 ) << res.time_ms << '\n';
 }

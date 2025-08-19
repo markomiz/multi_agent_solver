@@ -10,6 +10,9 @@
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/types.hpp"
 
+namespace mas
+{
+
 // Generic line search function alias
 using LineSearchFunction = std::function<
   double( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients, const MotionModel& dynamics,
@@ -119,4 +122,5 @@ constant_line_search( const State& /*initial_state*/, const ControlTrajectory& /
 {
 
   return get_parameter( parameters, "step_size", 0.1 );
+}
 }

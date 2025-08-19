@@ -1,28 +1,28 @@
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "multi_agent_solver/models/single_track_model.hpp"
 #include "multi_agent_solver/multi_agent_aggregator.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/cgd.hpp"
-#include "multi_agent_solver/solvers/ilqr.hpp"
-#include "multi_agent_solver/solvers/osqp_solver.hpp"
-#include "multi_agent_solver/types.hpp"
+#include "multi_agent_solver/solvers/solver.hpp"
 
-OCP
+mas::OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int agent_id,
-                                  const std::vector<std::shared_ptr<OCP>> &all_agents, int time_steps )
+                                  const std::vector<std::shared_ptr<mas::OCP>> &all_agents, int time_steps )
 {
+  using namespace mas;
   OCP problem;
 
   // System dimensions
-  problem.state_dim     = 5;
+  problem.state_dim     = 4;
   problem.control_dim   = 2;
   problem.horizon_steps = time_steps;
-  problem.dt            = 0.1;
+  problem.dt            = 0.5;
 
   // Convert (theta, radius) to (x, y)
   double x0 = track_radius * cos( initial_theta );
@@ -30,94 +30,90 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
 
   // Initial state (X, Y, psi, vx)
   problem.initial_state = Eigen::VectorXd::Zero( problem.state_dim );
-  problem.initial_state << x0, y0, initial_theta, target_velocity, 0.0;
+  problem.initial_state << x0, y0, 1.57 + initial_theta, 0.0;
 
   // Dynamics
   problem.dynamics = single_track_model;
 
-  problem.stage_cost = [&, id = agent_id]( const State &state, const Control &control, size_t idx ) -> double {
+  problem.stage_cost = [&, id = agent_id, target_velocity = target_velocity,
+                        track_radius = track_radius]( const State &state, const Control &control, size_t idx ) -> double {
     // Cost weights
-    const double w_track      = 0.1;
-    const double w_speed      = 0.1;
-    const double w_delta      = 0.1;
-    const double w_acc        = 0.1;
-    const double w_separation = 0.1;
+    const double w_track      = 1.0;
+    const double w_speed      = 1.0;
+    const double w_delta      = 0.001;
+    const double w_acc        = 0.001;
+    const double w_separation = 0.0;
 
     // Extract states
-    double x    = state( 0 );
-    double y    = state( 1 );
-    double psi  = state( 2 );
-    double vx   = state( 3 );
-    double time = state( 4 );
+    double x   = state( 0 );
+    double y   = state( 1 );
+    double psi = state( 2 );
+    double vx  = state( 3 );
 
     // Extract controls
     double delta = control( 0 );
     double a_cmd = control( 1 );
 
     // Compute deviation from circular path
-    double distance_from_track = std::abs( std::sqrt( x * x + y * y ) - track_radius );
+    double distance_from_track = std::abs( std::sqrt( x * x + y * y ) - 20 );
 
     // Compute speed error
-    double speed_error = vx - target_velocity;
+    double speed_error = vx - 10;
 
-    // Compute time index
-    int time_index = std::round( time / problem.dt );
+    // // Find the closest vehicle ahead and behind
+    // double min_distance_ahead  = std::numeric_limits<double>::max();
+    // double min_distance_behind = std::numeric_limits<double>::max();
 
-    // Find the closest vehicle ahead and behind
-    double min_distance_ahead  = std::numeric_limits<double>::max();
-    double min_distance_behind = std::numeric_limits<double>::max();
+    // for( const auto &other_agent : all_agents )
+    // {
+    //   if( other_agent == nullptr || other_agent->id == id )
+    //     continue;
 
-    for( const auto &other_agent : all_agents )
-    {
-      if( other_agent == nullptr || other_agent->id == id )
-        continue;
+    // const State &other_state = other_agent->initial_states.col( idx );
 
-      int          other_time_index = std::min( time_index, static_cast<int>( other_agent->initial_states.cols() ) - 1 );
-      const State &other_state      = other_agent->initial_states.col( other_time_index );
+    // double x_other = other_state( 0 );
+    // double y_other = other_state( 1 );
 
-      double x_other = other_state( 0 );
-      double y_other = other_state( 1 );
+    // double dx       = x_other - x;
+    // double dy       = y_other - y;
+    // double distance = std::sqrt( dx * dx + dy * dy );
 
-      double dx       = x_other - x;
-      double dy       = y_other - y;
-      double distance = std::sqrt( dx * dx + dy * dy );
+    // double theta_self       = std::atan2( y, x );
+    // double theta_other      = std::atan2( y_other, x_other );
+    // double angular_distance = theta_other - theta_self;
 
-      double theta_self       = std::atan2( y, x );
-      double theta_other      = std::atan2( y_other, x_other );
-      double angular_distance = theta_other - theta_self;
+    // if( angular_distance < 0 )
+    //   angular_distance += 2.0 * M_PI;
 
-      if( angular_distance < 0 )
-        angular_distance += 2.0 * M_PI;
+    // double arc_distance = track_radius * angular_distance;
 
-      double arc_distance = track_radius * angular_distance;
-
-      if( arc_distance > 0 && arc_distance < min_distance_ahead )
-      {
-        min_distance_ahead = arc_distance;
-      }
-      else if( arc_distance < 0 && std::abs( arc_distance ) < min_distance_behind )
-      {
-        min_distance_behind = std::abs( arc_distance );
-      }
-    }
+    // if( arc_distance > 0 && arc_distance < min_distance_ahead )
+    // {
+    //   min_distance_ahead = arc_distance;
+    // }
+    // else if( arc_distance < 0 && std::abs( arc_distance ) < min_distance_behind )
+    // {
+    //   min_distance_behind = std::abs( arc_distance );
+    // }
+    // }
 
     // Compute separation costs
-    double min_safe_distance = 30.0;
-    double separation_cost   = ( min_distance_ahead < min_safe_distance )
-                               ? w_separation * std::exp( -( min_distance_ahead - min_safe_distance ) / min_safe_distance )
-                               : 0.0;
+    // double min_safe_distance = 30.0;
+    // double separation_cost   = ( min_distance_ahead < min_safe_distance )
+    //                            ? w_separation * std::exp( -( min_distance_ahead - min_safe_distance ) / min_safe_distance )
+    //                            : 0.0;
 
-    double behind_penalty = ( min_distance_behind < min_safe_distance )
-                            ? w_separation * std::exp( -( min_distance_behind - min_safe_distance ) / min_safe_distance )
-                            : 0.0;
+    // double behind_penalty = ( min_distance_behind < min_safe_distance )
+    //                         ? w_separation * std::exp( -( min_distance_behind - min_safe_distance ) / min_safe_distance )
+    //                         : 0.0;
 
-    separation_cost += behind_penalty;
+    // separation_cost += behind_penalty;
 
     // Final cost
     double cost = w_track * ( distance_from_track * distance_from_track ) + w_speed * ( speed_error * speed_error )
-                + w_delta * ( delta * delta ) + w_acc * ( a_cmd * a_cmd ) + separation_cost;
+                + w_delta * ( delta * delta ) + w_acc * ( a_cmd * a_cmd );
 
-    return cost / 100;
+    return cost;
   };
 
   // Terminal cost
@@ -130,8 +126,8 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   };
 
   // Control bounds( steering, acceleration );
-  // problem.input_lower_bounds = Eigen::VectorXd::Constant( problem.control_dim, -0.5 );
-  // problem.input_upper_bounds = Eigen::VectorXd::Constant( problem.control_dim, 0.5 );
+  problem.input_lower_bounds = Eigen::VectorXd::Constant( problem.control_dim, -0.5 );
+  problem.input_upper_bounds = Eigen::VectorXd::Constant( problem.control_dim, 0.5 );
 
   // Initialize and verify the problem
   problem.initialize_problem();
@@ -140,156 +136,138 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   return problem;
 }
 
-int
-main( int /*num_arguments*/, char ** /*arguments*/ )
+struct Result
 {
-  int          num_agents      = 10;
-  int          time_steps      = 10;
-  const double track_radius    = 20.0;
-  const double target_velocity = 5.0;
+  std::string name;
+  double      cost;
+  double      time_ms;
+};
 
-  // Create aggregator for multi-agent problem
-  MultiAgentAggregator aggregator;
+int
+main()
+{
+  using namespace mas;
 
-  // Vector of agent OCPs (so cost function can access them)
+  SolverParams params{
+    { "max_iterations",   10 },
+    {      "tolerance", 1e-5 },
+    {         "max_ms", 1000 },
+    {          "debug",  1.0 }
+  };
+  constexpr int max_outer = 1;
+
+  constexpr int    num_agents      = 1;
+  constexpr int    time_steps      = 10;
+  constexpr double track_radius    = 20.0;
+  constexpr double target_velocity = 10.0;
+
+  MultiAgentAggregator              aggregator;
   std::vector<std::shared_ptr<OCP>> agent_ocps;
+  agent_ocps.reserve( num_agents );
 
-  // Assign each agent an OCP with an initial position along the circle
   for( int i = 0; i < num_agents; ++i )
   {
-    double initial_theta = 2.0 * M_PI * i / num_agents;
-    auto   agent_ocp     = std::make_shared<OCP>(
-      create_single_track_circular_ocp( initial_theta, track_radius, target_velocity, i, agent_ocps, time_steps ) );
-    agent_ocp->id = i;
-    agent_ocps.push_back( agent_ocp );
-    aggregator.agent_ocps[i] = agent_ocp;
+    double theta = 2.0 * M_PI * i / num_agents;
+    auto   ocp   = create_single_track_circular_ocp( theta, track_radius, target_velocity, i, agent_ocps, time_steps );
+
+    // check score with single agent solve
+    std::cerr << "\npre solve cost " << ocp.best_cost << std::endl;
+    std::cerr << "\n\nINITIAL states: \n" << ocp.initial_states << "\nINITIAL controls:\n" << ocp.initial_controls << std::endl;
+    std::cerr << "\n\nBEST states: \n" << ocp.best_states << "\nBEST controls:\n" << ocp.best_controls << std::endl;
+
+    ocp.reset();
+    std::cerr << "\n\npost reset cost " << ocp.best_cost << std::endl;
+    std::cerr << "\n\nINITIAL states: \n" << ocp.initial_states << "\nINITIAL controls:\n" << ocp.initial_controls << std::endl;
+    std::cerr << "\n\nBEST states: \n" << ocp.best_states << "\nBEST controls:\n" << ocp.best_controls << std::endl;
+
+    std::cerr << "\n\n";
+    // manually loop over stage costs:
+    for( int j = 0; j < time_steps; j++ )
+    {
+      auto s0 = ocp.initial_states.col( 0 );
+      auto u0 = ocp.initial_controls.col( 0 );
+      std::cerr << j << "th cost = " << ocp.stage_cost( s0, u0, 0 ) << std::endl;
+    }
+
+    OSQPCollocation solver;
+    solver.set_params( params );
+    solver.solve( ocp );
+    std::cerr << "\nosqp collocation single cost = " << ocp.best_cost << "\n\n" << std::endl;
+    std::cerr << "\n\nSOLVED states: \n" << ocp.best_states << "\ncontrols:\n" << ocp.best_controls << std::endl;
+
+
+    auto ocp_sp = std::make_shared<OCP>( ocp );
+    ocp_sp->id  = i;
+    agent_ocps.push_back( ocp_sp );
+    aggregator.agent_ocps[i] = ocp_sp;
   }
-  const int max_outer = 50;
 
-  SolverParams params;
-  params["max_iterations"] = 2;
-  params["tolerance"]      = 1e-5;
-  params["max_ms"]         = 100;
+  aggregator.compute_offsets(); // once
 
 
-  // Compute offsets for multi-agent system
-  aggregator.compute_offsets();
-  aggregator.reset();
+  std::vector<Result> results;
 
-  // Define solvers and multi-agent solving methods
-  std::vector<std::pair<std::string, Solver>> solvers = {
-    { "iLQR", ilqr_solver },
-    { "OSQP", osqp_solver },
-    {  "CGD",  cgd_solver }
+  auto time_solver = [&]( const std::string &name, auto &&solver_call ) {
+    std::cerr << "\n------ Solving with " << name << std::endl;
+    aggregator.reset();
+    auto start = std::chrono::high_resolution_clock::now();
+    solver_call();
+    auto                                      end     = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    results.push_back( { name, aggregator.agent_cost_sum(), elapsed.count() } );
+    std::cerr << "\n------ " << std::endl;
   };
 
-  std::vector<std::pair<std::string, std::function<double( MultiAgentAggregator &, const Solver &, int, const SolverParams &params )>>>
-    solving_methods = {
-      {                " Centralized",
+  // Benchmark solvers ---------------------------------------------------------
+  time_solver( "Centralized iLQR", [&] { aggregator.solve_centralized<iLQR>( params ); } );
+  time_solver( "Centralized CGD", [&] { aggregator.solve_centralized<CGD>( params ); } );
+  time_solver( "Centralized OSQP", [&] { aggregator.solve_centralized<OSQP>( params ); } );
+  // time_solver( "Centralized OSQPcol", [&] { aggregator.solve_centralized<OSQPCollocation>( params ); } );
 
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_centralized( solver, params );
- } },
+  // decentralised variants ----------------------------------------------------
+  time_solver( "Decentralized iLQR", [&] { aggregator.solve_decentralized_simple<iLQR>( max_outer, params ); } );
+  time_solver( "Decentralized CGD", [&] { aggregator.solve_decentralized_simple<CGD>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP", [&] { aggregator.solve_decentralized_simple<OSQP>( max_outer, params ); } );
+  time_solver( "Decentralized OSQPcol", [&] { aggregator.solve_decentralized_simple<OSQPCollocation>( max_outer, params ); } );
 
-      {       " Decentralized_Simple",
+  time_solver( "Decentralized iLQR (Line Search)", [&] { aggregator.solve_decentralized_line_search<iLQR>( max_outer, params ); } );
+  time_solver( "Decntralized CGD (Line Search)", [&] { aggregator.solve_decentralized_line_search<CGD>( max_outer, params ); } );
+  time_solver( "Decentralized OSQP (Line Search)", [&] { aggregator.solve_decentralized_line_search<OSQP>( max_outer, params ); } );
+  time_solver( "Decentralized OSQPcol (Line Search)",
+               [&] { aggregator.solve_decentralized_line_search<OSQPCollocation>( max_outer, params ); } );
 
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_simple( solver, outer, params );
- } },
 
-      {  " Decentralized_Line_Search",
+  /* ------------------------------------------------------------------ */
+  /*  Pretty table with colours                                          */
+  /* ------------------------------------------------------------------ */
+  namespace pc = print_color; // alias
 
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_line_search( solver, outer, params );
- } },
+  auto best_cost = std::min_element( results.begin(), results.end(), []( auto &a, auto &b ) { return a.cost < b.cost; } )->cost;
+  auto best_time = std::min_element( results.begin(), results.end(), []( auto &a, auto &b ) { return a.time_ms < b.time_ms; } )->time_ms;
 
-      { " Decentralized_Trust_Region",
-
-       []( MultiAgentAggregator &agg, const Solver &solver, int outer, const SolverParams &params ) {
- return agg.solve_decentralized_trust_region( solver, outer, params );
- } }
+  /* helper: choose colour -------------------------------------------------- */
+  auto colour = []( double val, double best, bool lower_is_better = true ) {
+    double ratio = lower_is_better ? val / best : best / val;
+    if( ratio <= 1.1 )
+      return pc::green; // ≤5 % from best
+    else if( ratio <= 2.0 )
+      return pc::yellow; // within 30 %
+    else
+      return pc::red; // worse
   };
 
-  // Storage for results
-  std::map<std::string, std::map<std::string, std::pair<double, double>>> results; // [method][solver] -> (cost, time)
+  std::cout << "Multi-Agent Single Track OCP Benchmark\n";
+  std::cout << "---------------------------------------\n";
+  std::cout << "Number of agents: " << num_agents << ", Time steps: " << time_steps << '\n';
 
-  // Run all solvers with all methods
-  for( const auto &method : solving_methods )
+  std::cout << '\n' << std::fixed << std::setprecision( 3 );
+  std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << '\n'
+            << std::string( 70, '-' ) << '\n';
+
+  for( const auto &r : results )
   {
-    for( const auto &solver : solvers )
-    {
-      aggregator.reset();
-      auto   start_time = std::chrono::high_resolution_clock::now();
-      double cost       = method.second( aggregator, solver.second, max_outer, params );
-      auto   end_time   = std::chrono::high_resolution_clock::now();
-      double time_ms    = std::chrono::duration<double, std::milli>( end_time - start_time ).count();
-
-      results[method.first][solver.first] = { cost, time_ms };
-    }
+    std::cout << std::setw( 40 ) << std::left << r.name << colour( r.cost, best_cost ) << std::setw( 15 ) << r.cost << pc::reset
+              << colour( r.time_ms, best_time ) << std::setw( 15 ) << r.time_ms << pc::reset << '\n';
   }
-
-  // **Find min/max for both cost and time**
-  double min_cost = std::numeric_limits<double>::max();
-  double max_cost = std::numeric_limits<double>::lowest();
-  double min_time = std::numeric_limits<double>::max();
-  double max_time = std::numeric_limits<double>::lowest();
-
-  for( const auto &method : results )
-  {
-    for( const auto &solver : method.second )
-    {
-      double cost    = solver.second.first;
-      double time_ms = solver.second.second;
-      if( cost < min_cost )
-        min_cost = cost;
-      if( cost > max_cost )
-        max_cost = cost;
-      if( time_ms < min_time )
-        min_time = time_ms;
-      if( time_ms > max_time )
-        max_time = time_ms;
-    }
-  }
-
-  // **Formatted Output Table**
-  std::cout << std::endl << "\n\n<<<<<<<  num agents  " << num_agents << "    horizon steps " << time_steps << std::endl;
-  std::cout << "========================================================================================" << std::endl;
-  std::cout << std::setw( 40 ) << "Outer Method" << std::setw( 20 ) << "Solver" << std::setw( 20 ) << "Time (ms)" << std::setw( 20 )
-            << "Cost" << std::endl;
-  std::cout << "========================================================================================\n";
-
-  for( const auto &method : results )
-  {
-    for( const auto &solver : method.second )
-    {
-      double cost    = solver.second.first;
-      double time_ms = solver.second.second;
-
-      // **Apply color coding**
-      std::string cost_color = RESET;
-      std::string time_color = RESET;
-
-      if( cost < 0.1 * ( max_cost - min_cost ) + min_cost )
-        cost_color = GREEN; // Best cost 🟩
-      else if( cost < 0.5 * ( max_cost - min_cost ) + min_cost )
-        cost_color = YELLOW; // Mid-range 🟨
-      else
-        cost_color = RED; // Worst cost 🟥
-
-      if( std::log( time_ms ) < 0.2 * std::log( max_time - min_time ) + std::log( min_time ) )
-        time_color = GREEN; // Fastest 🟩
-      else if( std::log( time_ms ) < 0.5 * std::log( max_time - min_time ) + std::log( min_time ) )
-        time_color = YELLOW; // Mid-range 🟨
-      else
-        time_color = RED; // Slowest 🟥
-
-      std::cout << std::setw( 40 ) << method.first << std::setw( 20 ) << solver.first << time_color // Apply time color
-                << std::setw( 20 ) << std::fixed << std::setprecision( 2 ) << time_ms << RESET      // Reset color
-                << cost_color                                                                       // Apply cost color
-                << std::setw( 20 ) << std::fixed << std::setprecision( 4 ) << cost << RESET         // Reset color
-                << "\n";
-    }
-  }
-
-  std::cout << "=======================================================================================\n";
+  return 0;
 }

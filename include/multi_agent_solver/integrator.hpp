@@ -5,6 +5,9 @@
 
 #include "multi_agent_solver/types.hpp"
 
+namespace mas
+{
+
 // Single-step Euler integration
 inline State
 integrate_euler( const State& current_state, const Control& control, double dt, const MotionModel& motion_model )
@@ -42,4 +45,5 @@ integrate_horizon( const State& initial_state, const ControlTrajectory& controls
   }
 
   return state_trajectory;
+}
 }

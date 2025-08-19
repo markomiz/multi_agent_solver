@@ -10,6 +10,9 @@
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/types.hpp"
 
+namespace mas
+{
+
 // Helper function to compute the augmented cost
 inline double
 compute_augmented_cost( const OCP& problem, const ConstraintViolations& equality_multipliers,
@@ -95,4 +98,5 @@ clamp_controls( ControlTrajectory& controls, const Control& lower_limit, const C
   {
     controls.col( t ) = controls.col( t ).cwiseMin( upper_limit ).cwiseMax( lower_limit );
   }
+}
 }

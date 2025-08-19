@@ -1,27 +1,35 @@
+// MultiAgentAggregator refactored: templated solver type
 #pragma once
 
 #include <omp.h>
 
+#include <algorithm>
 #include <cassert>
-#include <functional>
+#include <limits>
+#include <map>
 #include <memory>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
+#include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
-/**
- * @brief Struct to store each agent's dimensional offsets in the global vectors/matrices.
- */
+namespace mas
+{
+
+
 struct AgentBlockInfo
 {
-  size_t               agent_id;
-  int                  state_offset;
-  int                  control_offset;
-  int                  state_dim;
-  int                  control_dim;
-  std::shared_ptr<OCP> ocp_ptr;
+  std::size_t             agent_id;
+  int                     state_offset;
+  int                     control_offset;
+  int                     state_dim;
+  int                     control_dim;
+  std::shared_ptr<OCP>    ocp_ptr;
+  std::shared_ptr<Solver> solver; // one per agent, lives forever
 };
 
 class MultiAgentAggregator
@@ -30,80 +38,254 @@ public:
 
   using OCPPtr = std::shared_ptr<OCP>;
 
-  std::unordered_map<size_t, OCPPtr> agent_ocps;
-  std::optional<ObjectiveFunction>   cross_agent_cost                     = std::nullopt;
-  std::optional<ConstraintsFunction> cross_agent_equality_constraints     = std::nullopt;
-  std::optional<ConstraintsFunction> cross_agent_inequality_constraints   = std::nullopt;
-  bool                               use_only_global_cost_and_constraints = false;
-  std::vector<AgentBlockInfo>        agent_blocks;
+  std::unordered_map<std::size_t, OCPPtr> agent_ocps;
+  std::optional<ObjectiveFunction>        cross_agent_cost                     = std::nullopt;
+  std::optional<ConstraintsFunction>      cross_agent_equality_constraints     = std::nullopt;
+  std::optional<ConstraintsFunction>      cross_agent_inequality_constraints   = std::nullopt;
+  bool                                    use_only_global_cost_and_constraints = false;
+  std::vector<AgentBlockInfo>             agent_blocks;
 
+  //---------------------- offset bookkeeping ---------------------------//
   void
   compute_offsets()
   {
     agent_blocks.clear();
     agent_blocks.reserve( agent_ocps.size() );
-
-    int state_offset   = 0;
-    int control_offset = 0;
-    for( const auto& [agent_id, ocp] : agent_ocps )
+    int s_off = 0, u_off = 0;
+    for( const auto& [id, ocp] : agent_ocps )
     {
-      AgentBlockInfo info;
-      info.agent_id       = agent_id;
-      info.state_offset   = state_offset;
-      info.control_offset = control_offset;
-      info.state_dim      = ocp->state_dim;
-      info.control_dim    = ocp->control_dim;
-      info.ocp_ptr        = ocp;
-      agent_blocks.push_back( info );
-
-      state_offset   += ocp->state_dim;
-      control_offset += ocp->control_dim;
+      agent_blocks.push_back( { id, s_off, u_off, ocp->state_dim, ocp->control_dim, ocp } );
+      s_off += ocp->state_dim;
+      u_off += ocp->control_dim;
     }
   }
 
-  OCP
-  create_global_ocp() const
+  template<typename SolverT>
+  void
+  initialize_solvers( const SolverParams& p )
   {
-    assert( !agent_blocks.empty() && "No agent offsets computed. Call compute_offsets() first." );
-    OCP global_ocp;
-
-    set_total_dimensions( global_ocp );
-    set_timing_info( global_ocp );
-    set_initial_state( global_ocp );
-    setup_dynamics( global_ocp );
-    setup_objective_function( global_ocp );
-    setup_equality_constraints( global_ocp );
-    setup_inequality_constraints( global_ocp );
-
-    global_ocp.initialize_problem();
-    global_ocp.verify_problem();
-    assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
-
-    return global_ocp;
+    for( auto& blk : agent_blocks )
+    {
+      blk.solver = create<SolverT>();
+      set_params( *blk.solver, p );
+    }
   }
 
+  //---------------------------------------------------------------------
+  //  Centralised solve  – single solver instance
+  //---------------------------------------------------------------------
+  template<typename SolverT>
   double
-  solve_centralized( const Solver& solver, const SolverParams& params )
+  solve_centralized( const SolverParams& params )
   {
-
     if( agent_blocks.empty() )
       compute_offsets();
-
     OCP global_ocp = create_global_ocp();
-    solver( global_ocp, params );
 
-    // Update individual agent OCPs with solved global trajectory
-    for( const auto& block : agent_blocks )
+    SolverT solver; // one solver instance
+    solver.set_params( params );
+    solver.solve( global_ocp );
+
+    for( const auto& blk : agent_blocks )
     {
-      block.ocp_ptr->best_states   = global_ocp.best_states.block( block.state_offset, 0, block.state_dim, global_ocp.best_states.cols() );
-      block.ocp_ptr->best_controls = global_ocp.best_controls.block( block.control_offset, 0, block.control_dim,
-                                                                     global_ocp.best_controls.cols() );
-
-      block.ocp_ptr->best_cost = global_ocp.best_cost / agent_blocks.size();
+      blk.ocp_ptr->best_states   = global_ocp.best_states.block( blk.state_offset, 0, blk.state_dim, global_ocp.best_states.cols() );
+      blk.ocp_ptr->best_controls = global_ocp.best_controls.block( blk.control_offset, 0, blk.control_dim,
+                                                                   global_ocp.best_controls.cols() );
+      blk.ocp_ptr->best_cost     = global_ocp.best_cost / agent_blocks.size();
     }
     return global_ocp.best_cost;
   }
 
+  //---------------------------------------------------------------------
+  //  Per‑agent parallel solve – creates one SolverT per agent
+  //---------------------------------------------------------------------
+  template<typename SolverT>
+  void
+  solve_all_agents( const SolverParams& params )
+  {
+#pragma omp parallel for
+    for( size_t i = 0; i < agent_blocks.size(); ++i )
+    {
+      solve( *agent_blocks[i].solver, *agent_blocks[i].ocp_ptr );
+    }
+#pragma omp parallel for
+    for( size_t i = 0; i < agent_blocks.size(); ++i )
+    {
+      agent_blocks[i].ocp_ptr->update_initial_with_best();
+    }
+  }
+
+  //---------------------------------------------------------------------
+  //  Decentralised methods – template wrappers call solve_all_agents()
+  //---------------------------------------------------------------------
+  template<typename SolverT>
+  double
+  solve_decentralized_simple( int max_outer, const SolverParams& params )
+  {
+    double       total_cost = agent_cost_sum();
+    const double tol        = params.at( "tolerance" );
+    initialize_solvers<SolverT>( params );
+
+    for( int k = 0; k < max_outer; ++k )
+    {
+      solve_all_agents<SolverT>( params );
+      double new_cost = agent_cost_sum();
+      if( total_cost > new_cost + tol )
+        total_cost = new_cost;
+      else
+        break;
+    }
+    return total_cost;
+  }
+
+  template<typename SolverT>
+  double
+  solve_decentralized_trust_region( int max_outer, const SolverParams& params )
+  {
+    initialize_solvers<SolverT>( params );
+
+    const double tol = params.at( "tolerance" );
+    std::size_t  n   = agent_blocks.size();
+
+    std::vector<double> delta( n, 1.0 );
+    const double        eta1 = 0.01, eta2 = 0.5;
+    const double        shrink = 0.8, expand = 1.5;
+    const double        min_delta = 1e-3, max_delta = 1.0;
+
+    double total_cost = agent_cost_sum();
+
+    for( int outer = 0; outer < max_outer; ++outer )
+    {
+      auto prev_ctrl = backup_controls();
+      solve_all_agents<SolverT>( params );
+      auto   new_ctrl   = backup_controls();
+      auto   ctrl_delta = compute_control_deltas( prev_ctrl, new_ctrl );
+      double trial_cost = agent_cost_sum();
+
+      std::vector<ControlTrajectory> best_ctrl = prev_ctrl;
+      double                         best_cost = total_cost;
+
+      for( std::size_t i = 0; i < n; ++i )
+      {
+        double alpha = delta[i];
+        while( alpha > min_delta )
+        {
+          ControlTrajectory blended = prev_ctrl[i] + alpha * ctrl_delta[i];
+          auto&             ocp     = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls         = blended;
+          ocp.best_states           = integrate_horizon( ocp.initial_state, blended, ocp.dt, ocp.dynamics, integrate_rk4 );
+
+          double new_cost  = agent_cost_sum();
+          double predicted = ( total_cost - trial_cost ) * alpha;
+          double actual    = total_cost - new_cost;
+          double rho       = ( predicted == 0.0 ? 0.0 : actual / predicted );
+
+          if( rho > eta2 )
+          {
+            delta[i]     = std::min( max_delta, delta[i] * expand );
+            best_ctrl[i] = blended;
+            best_cost    = new_cost;
+            break;
+          }
+          if( rho > eta1 )
+          {
+            best_ctrl[i] = blended;
+            best_cost    = new_cost;
+            break;
+          }
+          alpha *= shrink;
+        }
+      }
+      apply_control_updates( best_ctrl );
+      double new_total = agent_cost_sum();
+      if( new_total > total_cost + tol )
+        restore_controls( prev_ctrl );
+      else
+        total_cost = new_total;
+      // if( total_cost > best_cost - tol )
+      //   break;
+
+      std::cerr << "outer loop : " << outer << std::endl;
+    }
+    return total_cost;
+  }
+
+  template<typename SolverT>
+  double
+  solve_decentralized_line_search( int max_outer, const SolverParams& params )
+  {
+    initialize_solvers<SolverT>( params );
+
+
+    const double c1        = 1e-4; // Armijo fraction
+    const double shrink    = 0.5;  // α ← α·shrink
+    const double min_alpha = 1e-5; // stop backtracking here
+    const double tol       = params.at( "tolerance" );
+
+    double      total_cost = agent_cost_sum(); // current best
+    std::size_t n          = agent_blocks.size();
+
+    /* -------- outer iterations ----------------------------------- */
+    for( int outer = 0; outer < max_outer; ++outer )
+    {
+      /* (1) solve every agent once in parallel ------------------ */
+      auto prev_ctrl = backup_controls();  // U_k
+      solve_all_agents<SolverT>( params ); // produces U_trial
+      auto trial_ctrl = backup_controls(); // U_k + ΔU
+      auto delta_ctrl = compute_control_deltas( prev_ctrl, trial_ctrl );
+
+      /* (2) line search *per agent* ----------------------------- */
+      std::vector<ControlTrajectory> best_ctrl = prev_ctrl;
+      double                         best_cost = total_cost;
+
+      for( std::size_t i = 0; i < n; ++i )
+      {
+        double alpha = 1.0;
+        while( alpha >= min_alpha )
+        {
+          ControlTrajectory blended = prev_ctrl[i] + alpha * delta_ctrl[i];
+
+          /* write into agent i only ------------------------ */
+          auto& ocp         = *agent_blocks[i].ocp_ptr;
+          ocp.best_controls = blended;
+          ocp.best_states   = integrate_horizon( ocp.initial_state, blended, ocp.dt, ocp.dynamics, integrate_rk4 );
+
+          double new_cost  = agent_cost_sum(); // global
+          double predicted = -c1 * alpha *     // Armijo
+                             ( total_cost - ocp.best_cost );
+          if( new_cost <= total_cost + predicted )
+          {
+            best_ctrl[i] = blended; // accept
+            best_cost    = new_cost;
+            break;
+          }
+          alpha *= shrink; // back-track
+        }
+      }
+
+      /* (3) apply accepted updates ------------------------------ */
+      apply_control_updates( best_ctrl );
+      double new_total = agent_cost_sum();
+
+      if( total_cost - new_total < tol ) // no significant progress
+        return new_total;
+
+      total_cost = new_total; // continue outer loop
+    }
+    return total_cost;
+  }
+
+  //---------------------------------------------------------------------
+  void
+  reset()
+  {
+    for( auto& blk : agent_blocks )
+      blk.ocp_ptr->reset();
+  }
+
+  //---------------------------------------------------------------------
+  // helpers identical to earlier version (agent_cost_sum, backup_controls, etc.)
+  //---------------------------------------------------------------------
   double
   agent_cost_sum()
   {
@@ -114,22 +296,6 @@ public:
       new_total_cost += block.ocp_ptr->best_cost;
     }
     return new_total_cost;
-  }
-
-  void
-  solve_all_agents( const Solver& solver, const SolverParams& params )
-  {
-#pragma omp parallel for
-    for( size_t i = 0; i < agent_blocks.size(); ++i )
-    {
-      solver( *agent_blocks[i].ocp_ptr, params );
-    }
-
-#pragma omp parallel for
-    for( size_t i = 0; i < agent_blocks.size(); ++i )
-    {
-      agent_blocks[i].ocp_ptr->update_initial_with_best();
-    }
   }
 
   std::vector<ControlTrajectory>
@@ -162,203 +328,17 @@ public:
   {
     for( size_t i = 0; i < agent_blocks.size(); ++i )
     {
-      auto& ocp         = *agent_blocks[i].ocp_ptr;
-      ocp.best_controls = controls[i];
-      ocp.best_states   = integrate_horizon( ocp.initial_state, ocp.best_controls, ocp.dt, ocp.dynamics, integrate_rk4 );
-    }
-  }
-
-  double
-  solve_decentralized_trust_region( const Solver& solver, int max_outer_iterations, const SolverParams& params )
-  {
-
-    double total_cost = std::numeric_limits<double>::max();
-
-    size_t              num_agents = agent_blocks.size();
-    std::vector<double> delta( num_agents, 1.0 ); // Initial trust region per agent
-    const double        eta1 = 0.01, eta2 = 0.5;  // Trust-region acceptance thresholds
-    const double        shrink_factor = 0.8, expand_factor = 1.5;
-    const double        min_delta = 1e-3, max_delta = 1.0;
-    const double        tolerance = params.at( "tolerance" );
-
-    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
-    {
-      auto prev_controls = backup_controls();
-      solve_all_agents( solver, params );
-      auto new_controls   = backup_controls();
-      auto control_deltas = compute_control_deltas( prev_controls, new_controls );
-
-      double trial_cost = agent_cost_sum();
-
-      std::vector<ControlTrajectory> best_controls = prev_controls;
-      double                         best_cost     = total_cost;
-      std::vector<double>            agent_rho( num_agents, -1.0 );
-
-      for( size_t i = 0; i < num_agents; ++i )
-      {
-        double alpha             = delta[i]; // Start with the agent's trust-region size
-        double best_alpha        = alpha;
-        double agent_cost_before = total_cost;
-
-        while( alpha > min_delta )
-        {
-          ControlTrajectory blended_control = prev_controls[i] + alpha * control_deltas[i];
-
-          // Apply update to the agent
-          auto& ocp         = *agent_blocks[i].ocp_ptr;
-          ocp.best_controls = blended_control;
-          ocp.best_states   = integrate_horizon( ocp.initial_state, blended_control, ocp.dt, ocp.dynamics, integrate_rk4 );
-
-          // Compute new total cost
-          double new_cost              = agent_cost_sum();
-          double predicted_improvement = ( total_cost - trial_cost ) * alpha;
-          double actual_improvement    = total_cost - new_cost;
-          double rho                   = actual_improvement / predicted_improvement;
-
-          agent_rho[i] = rho;
-
-          if( rho > eta2 )
-          {
-            delta[i]         = std::min( max_delta, delta[i] * expand_factor ); // Expand trust region
-            best_controls[i] = blended_control;
-            best_alpha       = alpha;
-            best_cost        = new_cost;
-            break;
-          }
-          else if( rho > eta1 )
-          {
-            best_controls[i] = blended_control;
-            best_alpha       = alpha;
-            best_cost        = new_cost;
-            break;
-          }
-          else
-          {
-            alpha *= shrink_factor; // Reduce step size
-          }
-        }
-
-        if( best_cost > agent_cost_before )
-          delta[i] *= 0.5;
-      }
-
-      apply_control_updates( best_controls );
-
-      double total_new_cost = agent_cost_sum();
-
-      if( total_new_cost > total_cost + tolerance )
-      {
-        restore_controls( prev_controls );
-      }
-      else
-      {
-        total_cost = total_new_cost;
-      }
-
-      if( total_cost > best_cost - tolerance )
-      {
-        break;
-      }
-    }
-
-    return total_cost;
-  }
-
-  double
-  solve_decentralized_simple( const Solver& solver, int max_outer_iterations, const SolverParams& params )
-  {
-    double       total_cost = std::numeric_limits<double>::max();
-    const double tolerance  = params.at( "tolerance" );
-
-    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
-    {
-      solve_all_agents( solver, params );
-      double new_total_cost = agent_cost_sum();
-      if( total_cost > new_total_cost + tolerance )
-        total_cost = new_total_cost;
-      else
-      {
-        break;
-      }
-    }
-
-    return total_cost;
-  }
-
-  double
-  solve_decentralized_line_search( const Solver& solver, int max_outer_iterations, const SolverParams& params )
-  {
-    double total_cost = std::numeric_limits<double>::max();
-
-    const double c1        = 1e-4; // Armijo parameter (small)
-    const double reduction = 0.5;  // Backtracking factor
-    const double min_alpha = 1e-3; // Minimum step size
-    const double tolerance = params.at( "tolerance" );
-
-    std::vector<ControlTrajectory> blended_controls( agent_blocks.size() );
-    for( int outer_iter = 0; outer_iter < max_outer_iterations; ++outer_iter )
-    {
-      // Backup controls before optimization
-      auto prev_controls = backup_controls();
-      solve_all_agents( solver, params );
-
-      auto new_controls   = backup_controls();
-      auto control_deltas = compute_control_deltas( prev_controls, new_controls );
-
-      double alpha      = 1.0;
-      double best_alpha = alpha;
-      double best_cost  = total_cost;
-
-      // Compute initial cost and predicted improvement
-      double initial_cost          = agent_cost_sum();
-      double predicted_improvement = ( total_cost - initial_cost ) * c1;
-
-
-      while( alpha > min_alpha )
-      {
-
-        for( size_t i = 0; i < agent_blocks.size(); ++i )
-          blended_controls[i] = prev_controls[i] + alpha * control_deltas[i];
-
-        apply_control_updates( blended_controls );
-        double new_cost = agent_cost_sum();
-
-        if( new_cost < initial_cost + alpha * predicted_improvement ) // Armijo condition
-        {
-          best_alpha = alpha;
-          best_cost  = new_cost;
-          break;
-        }
-
-        alpha *= reduction;
-      }
-
-      if( alpha < min_alpha )
-        apply_control_updates( prev_controls ); // Restore previous controls if no improvement found
-
-      if( total_cost > best_cost + tolerance )
-        total_cost = best_cost;
-      else
-      {
-        break;
-      }
-    }
-
-    return total_cost;
-  }
-
-  void
-  reset()
-  {
-    for( auto& block : agent_blocks )
-    {
-      block.ocp_ptr->reset();
+      auto ocp_ptr           = agent_blocks[i].ocp_ptr;
+      ocp_ptr->best_controls = controls[i];
+      ocp_ptr->best_states   = integrate_horizon( ocp_ptr->initial_state, ocp_ptr->best_controls, ocp_ptr->dt, ocp_ptr->dynamics,
+                                                  integrate_rk4 );
+      ocp_ptr->update_initial_with_best();
     }
   }
 
 private:
 
-  // Helper to set the total dimensions of the global OCP
+  // Global‑OCP helper definitions (unchanged from previous version)
   void
   set_total_dimensions( OCP& global_ocp ) const
   {
@@ -560,4 +540,27 @@ private:
       return ineq_violations;
     };
   }
+
+  OCP
+  create_global_ocp() const
+  {
+    assert( !agent_blocks.empty() && "No agent offsets computed. Call compute_offsets() first." );
+    OCP global_ocp;
+
+    set_total_dimensions( global_ocp );
+    set_timing_info( global_ocp );
+    set_initial_state( global_ocp );
+    setup_dynamics( global_ocp );
+    setup_objective_function( global_ocp );
+    setup_equality_constraints( global_ocp );
+    setup_inequality_constraints( global_ocp );
+
+    global_ocp.initialize_problem();
+    global_ocp.verify_problem();
+    assert( global_ocp.objective_function && "❌ ERROR: Global OCP objective function was not set!" );
+
+    return global_ocp;
+  }
 };
+
+} // namespace mas

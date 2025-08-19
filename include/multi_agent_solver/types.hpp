@@ -6,6 +6,10 @@
 #include <unordered_map>
 
 #include <Eigen/Dense>
+
+namespace mas
+{
+
 // Types defined for clarity in other functions
 using State             = Eigen::VectorXd;
 using StateDerivative   = Eigen::VectorXd;
@@ -46,10 +50,15 @@ using ControlGradient         = Eigen::MatrixXd;
 using GradientComputer
   = std::function<ControlGradient( const State& initial_state, const ControlTrajectory& controls, const MotionModel& dynamics,
                                    const ObjectiveFunction& objective_function, double timestep )>;
-
+using SolverParams = std::unordered_map<std::string, double>;
 
 // ANSI Escape Codes for Colors
-#define RESET  "\033[0m"
-#define GREEN  "\033[1;32m"
-#define YELLOW "\033[1;33m"
-#define RED    "\033[1;31m"
+namespace print_color
+{
+inline constexpr const char* reset  = "\033[0m";
+inline constexpr const char* green  = "\033[1;32m";
+inline constexpr const char* yellow = "\033[1;33m";
+inline constexpr const char* red    = "\033[1;31m";
+} // namespace print_color
+
+} // namespace mas

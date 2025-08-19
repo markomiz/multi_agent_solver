@@ -1,9 +1,8 @@
+// Re-usable-memory iLQR solver
 #pragma once
 
 #include <chrono>
 #include <iostream>
-#include <map>
-#include <string>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -13,156 +12,261 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
-/**
- * @brief A standard iLQR solver that stores K[t], k[t] for each step t and performs
- *        a proper forward pass using these gains.
- *
- * @param problem        The OCP containing dynamics, cost function, etc.
- * @param max_iterations Maximum iLQR iterations
- * @param tolerance      Convergence threshold on cost improvement
- */
-
-inline void
-ilqr_solver( OCP& problem, const SolverParams& params )
+namespace mas
 {
-  const bool debug = params.count( "debug" ) && params.at( "debug" ) > 0.5;
-  using clock      = std::chrono::high_resolution_clock;
-  auto start_time  = clock::now();
 
-  const int    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
-  const double tolerance      = params.at( "tolerance" );
-  const double max_ms         = params.at( "max_ms" );
+/**
+ * @brief iLQR solver.
+ *
+ *  - Class name:  (iLQR)
+ *
+ * Call `solve(ocp)` as many times as you like—the buffers are resized only
+ * when problem dimensions (T, n_x, n_u) change.
+ */
+class iLQR
+{
+public:
 
-  const int    T   = problem.horizon_steps;
-  const int    n_x = problem.state_dim;
-  const int    n_u = problem.control_dim;
-  const double dt  = problem.dt;
+  explicit iLQR() {}
 
-  StateTrajectory&   x    = problem.best_states;
-  ControlTrajectory& u    = problem.best_controls;
-  auto&              cost = problem.best_cost;
-
-  x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
-  cost = problem.objective_function( x, u );
-
-  if( debug )
-    std::cerr << "Initial cost: " << cost << std::endl;
-
-  std::vector<Eigen::MatrixXd> K( T, Eigen::MatrixXd::Zero( n_u, n_x ) );
-  std::vector<Eigen::VectorXd> k( T, Eigen::VectorXd::Zero( n_u ) );
-
-  for( int iter = 0; iter < max_iterations; ++iter )
+  void
+  set_params( const SolverParams& params )
   {
-    auto   now        = clock::now();
-    double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( now - start_time ).count();
-    if( elapsed_ms > max_ms )
+    max_iterations = static_cast<int>( params.at( "max_iterations" ) );
+    tolerance      = params.at( "tolerance" );
+    max_ms         = params.at( "max_ms" );
+    debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
+  }
+
+  //------------------------------- API ----------------------------------//
+  void
+  solve( OCP& problem )
+  {
+    using clock      = std::chrono::high_resolution_clock;
+    const auto start = clock::now();
+
+    resize_buffers( problem ); // make sure caches fit this problem
+
+    const int    T  = problem.horizon_steps;
+    const int    nx = problem.state_dim;
+    const int    nu = problem.control_dim;
+    const double dt = problem.dt;
+
+    // Aliases to OCP solution references
+    StateTrajectory&   x    = problem.best_states;
+    ControlTrajectory& u    = problem.best_controls;
+    double&            cost = problem.best_cost;
+    if( debug )
+      std::cerr << "1 initial cost: " << cost << '\n';
+
+    // ---------- initial rollout & cost ----------------------------------
+    x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
+    cost = problem.objective_function( x, u );
+    if( debug )
+      std::cerr << "2 initial cost: " << cost << '\n';
+
+    // ------------------------ main loop ---------------------------------
+    for( int iter = 0; iter < max_iterations; ++iter )
     {
-      if( debug )
-        std::cerr << "iLQR exited due to time constraint at iteration " << iter << ": " << elapsed_ms << " ms " << max_ms << " ms"
-                  << std::endl;
-      break;
-    }
-
-    Eigen::VectorXd V_x  = Eigen::VectorXd::Zero( n_x );
-    Eigen::MatrixXd V_xx = Eigen::MatrixXd::Zero( n_x, n_x );
-
-    for( int t = T - 1; t >= 0; --t )
-    {
-      const Eigen::MatrixXd A = problem.dynamics_state_jacobian( problem.dynamics, x.col( t ), u.col( t ) );
-      const Eigen::MatrixXd B = problem.dynamics_control_jacobian( problem.dynamics, x.col( t ), u.col( t ) );
-
-      const Eigen::VectorXd l_x  = problem.cost_state_gradient( problem.stage_cost, x.col( t ), u.col( t ), t );
-      const Eigen::VectorXd l_u  = problem.cost_control_gradient( problem.stage_cost, x.col( t ), u.col( t ), t );
-      const Eigen::MatrixXd l_xx = problem.cost_state_hessian( problem.stage_cost, x.col( t ), u.col( t ), t );
-      const Eigen::MatrixXd l_uu = problem.cost_control_hessian( problem.stage_cost, x.col( t ), u.col( t ), t );
-      const Eigen::MatrixXd l_ux = problem.cost_cross_term( problem.stage_cost, x.col( t ), u.col( t ), t );
-
-      Eigen::VectorXd Q_x  = l_x + A.transpose() * V_x;
-      Eigen::VectorXd Q_u  = l_u + B.transpose() * V_x;
-      Eigen::MatrixXd Q_xx = l_xx + A.transpose() * V_xx * A;
-      Eigen::MatrixXd Q_ux = l_ux + B.transpose() * V_xx * A;
-      Eigen::MatrixXd Q_uu = l_uu + B.transpose() * V_xx * B;
-
-      Eigen::MatrixXd             Q_uu_reg = Q_uu;
-      Eigen::LLT<Eigen::MatrixXd> llt( Q_uu_reg );
-      double                      reg_term = 1e-6;
-      while( llt.info() != Eigen::Success )
+      const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
+      if( elapsed_ms > max_ms )
       {
-        Q_uu_reg += reg_term * Eigen::MatrixXd::Identity( n_u, n_u );
-        llt.compute( Q_uu_reg );
-        reg_term *= 10;
-      }
-
-      Eigen::MatrixXd Q_uu_inv = llt.solve( Eigen::MatrixXd::Identity( n_u, n_u ) );
-      K[t]                     = -Q_uu_inv * Q_ux;
-      k[t]                     = -Q_uu_inv * Q_u;
-
-      V_x  = Q_x - K[t].transpose() * ( Q_uu * k[t] + Q_u );
-      V_xx = Q_xx - K[t].transpose() * ( Q_uu * K[t] + Q_ux );
-      V_xx = 0.5 * ( V_xx + V_xx.transpose() );
-    }
-
-    double            best_cost = cost;
-    StateTrajectory   best_x    = x;
-    ControlTrajectory best_u    = u;
-
-    double       alpha     = 1.0;
-    const double alpha_min = 1e-7;
-
-    while( alpha >= alpha_min )
-    {
-      StateTrajectory   x_new = StateTrajectory::Zero( n_x, T + 1 );
-      ControlTrajectory u_new = ControlTrajectory::Zero( n_u, T );
-      x_new.col( 0 )          = problem.initial_state;
-
-      for( int t = 0; t < T; ++t )
-      {
-        Eigen::VectorXd dx = x_new.col( t ) - x.col( t );
-        u_new.col( t )     = u.col( t ) + alpha * k[t] + K[t] * dx;
-
-        if( problem.input_lower_bounds && problem.input_upper_bounds )
-          clamp_controls( u_new, *problem.input_lower_bounds, *problem.input_upper_bounds );
-
-        x_new.col( t + 1 ) = integrate_rk4( x_new.col( t ), u_new.col( t ), dt, problem.dynamics );
-      }
-
-      double new_cost = problem.objective_function( x_new, u_new );
-
-      if( new_cost < best_cost )
-      {
-        best_cost = new_cost;
-        best_x    = x_new;
-        best_u    = u_new;
+        if( debug )
+          std::cerr << "iLQR time limit hit after " << elapsed_ms << " ms / " << max_ms << " ms\n";
         break;
       }
 
-      alpha *= 0.5;
-    }
+      //---------------------- backward pass -----------------------------//
+      v_x.setZero();
+      v_xx.setZero();
 
-    double cost_improv = cost - best_cost;
-    if( debug )
-      std::cerr << "Iteration " << iter << ": cost = " << best_cost << ", improvement = " << cost_improv << std::endl;
-
-    if( cost_improv < tolerance )
-    {
-      if( debug )
+      for( int t = T - 1; t >= 0; --t )
       {
-        auto   now        = clock::now();
-        double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( now - start_time ).count();
-        std::cerr << "Converged at iteration " << iter << ", improvement " << cost_improv << " < tolerance " << tolerance << " in "
-                  << elapsed_ms << " ms" << std::endl;
+        // Pre-compute per-step dynamics & cost Jacobians/Hessians ----------
+        a_step[t] = problem.dynamics_state_jacobian( problem.dynamics, x.col( t ), u.col( t ) );
+        b_step[t] = problem.dynamics_control_jacobian( problem.dynamics, x.col( t ), u.col( t ) );
+
+        l_x_step[t]  = problem.cost_state_gradient( problem.stage_cost, x.col( t ), u.col( t ), t );
+        l_u_step[t]  = problem.cost_control_gradient( problem.stage_cost, x.col( t ), u.col( t ), t );
+        l_xx_step[t] = problem.cost_state_hessian( problem.stage_cost, x.col( t ), u.col( t ), t );
+        l_uu_step[t] = problem.cost_control_hessian( problem.stage_cost, x.col( t ), u.col( t ), t );
+        l_ux_step[t] = problem.cost_cross_term( problem.stage_cost, x.col( t ), u.col( t ), t );
+
+        // Construct Q terms using cached buffers -------------------------
+        q_x_step[t]  = l_x_step[t] + a_step[t].transpose() * v_x;
+        q_u_step[t]  = l_u_step[t] + b_step[t].transpose() * v_x;
+        q_xx_step[t] = l_xx_step[t] + a_step[t].transpose() * v_xx * a_step[t];
+        q_ux_step[t] = l_ux_step[t] + b_step[t].transpose() * v_xx * a_step[t];
+        q_uu_step[t] = l_uu_step[t] + b_step[t].transpose() * v_xx * b_step[t];
+
+        // Regularised Cholesky of Q_uu -----------------------------------
+        q_uu_reg_step[t] = q_uu_step[t];
+        auto&  llt       = llt_step[t];
+        double reg       = 1e-6;
+        while( true )
+        {
+          llt.compute( q_uu_reg_step[t] );
+          if( llt.info() == Eigen::Success )
+            break;
+          q_uu_reg_step[t] += reg * identity_nu;
+          reg              *= 10.0;
+        }
+        q_uu_inv_step[t] = llt.solve( identity_nu );
+
+        // Gains -----------------------------------------------------------
+        k[t]        = -q_uu_inv_step[t] * q_u_step[t];
+        k_matrix[t] = -q_uu_inv_step[t] * q_ux_step[t];
+
+        // Value function update ------------------------------------------
+        v_x  = q_x_step[t] + k_matrix[t].transpose() * ( q_uu_step[t] * k[t] + q_u_step[t] );
+        v_xx = q_xx_step[t] + k_matrix[t].transpose() * ( q_uu_step[t] * k_matrix[t] + q_ux_step[t] );
+        v_xx = 0.5 * ( v_xx + v_xx.transpose() ); // symmetrise
       }
 
+      //---------------------- forward pass ------------------------------//
+      x_trial.setZero();
+      u_trial.setZero();
+      x_trial.col( 0 ) = problem.initial_state;
+
+      double            alpha     = 1.0;
+      const double      amin      = 1e-3;
+      double            best_cost = cost;
+      StateTrajectory   best_x    = x;
+      ControlTrajectory best_u    = u;
+
+      while( alpha >= amin )
+      {
+        for( int t = 0; t < T; ++t )
+        {
+          const Eigen::VectorXd dx = x_trial.col( t ) - x.col( t );
+          u_trial.col( t )         = u.col( t ) + alpha * k[t] + k_matrix[t] * dx;
+
+          if( problem.input_lower_bounds && problem.input_upper_bounds )
+            clamp_controls( u_trial, *problem.input_lower_bounds, *problem.input_upper_bounds );
+
+          x_trial.col( t + 1 ) = integrate_rk4( x_trial.col( t ), u_trial.col( t ), dt, problem.dynamics );
+        }
+
+        const double new_cost = problem.objective_function( x_trial, u_trial );
+        if( new_cost < best_cost )
+        {
+          best_cost = new_cost;
+          best_x    = x_trial;
+          best_u    = u_trial;
+          break;
+        }
+        alpha *= 0.5;
+      }
+
+      const double improvement = cost - best_cost;
+      if( debug )
+        std::cerr << "iLQR iter " << iter << ": cost=" << best_cost << ", Δ=" << improvement << '\n';
+
       x    = best_x;
       u    = best_u;
       cost = best_cost;
-      break;
-    }
-    else
-    {
-      x    = best_x;
-      u    = best_u;
-      cost = best_cost;
+
+      if( improvement < tolerance )
+      {
+        if( debug )
+        {
+          const double total_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
+          std::cerr << "iLQR converged in " << total_ms << " ms\n";
+        }
+        break;
+      }
     }
   }
-}
+
+private:
+
+  //---------------- buffer management ----------------------------------//
+  void
+  resize_buffers( const OCP& problem )
+  {
+    const int T  = problem.horizon_steps;
+    const int nx = problem.state_dim;
+    const int nu = problem.control_dim;
+
+    // Resize per-time-step vectors/matrices ------------------------------
+    auto resize_mat_vec = [&]( auto& container, auto&& prototype ) {
+      if( static_cast<int>( container.size() ) != T )
+        container.assign( T, prototype );
+      else
+        for( auto& m : container )
+          m.setZero();
+    };
+
+    resize_mat_vec( k, Eigen::VectorXd::Zero( nu ) );
+    resize_mat_vec( k_matrix, Eigen::MatrixXd::Zero( nu, nx ) );
+
+    resize_mat_vec( a_step, Eigen::MatrixXd::Zero( nx, nx ) );
+    resize_mat_vec( b_step, Eigen::MatrixXd::Zero( nx, nu ) );
+    resize_mat_vec( l_x_step, Eigen::VectorXd::Zero( nx ) );
+    resize_mat_vec( l_u_step, Eigen::VectorXd::Zero( nu ) );
+    resize_mat_vec( l_xx_step, Eigen::MatrixXd::Zero( nx, nx ) );
+    resize_mat_vec( l_uu_step, Eigen::MatrixXd::Zero( nu, nu ) );
+    resize_mat_vec( l_ux_step, Eigen::MatrixXd::Zero( nu, nx ) );
+
+    resize_mat_vec( q_x_step, Eigen::VectorXd::Zero( nx ) );
+    resize_mat_vec( q_u_step, Eigen::VectorXd::Zero( nu ) );
+    resize_mat_vec( q_xx_step, Eigen::MatrixXd::Zero( nx, nx ) );
+    resize_mat_vec( q_ux_step, Eigen::MatrixXd::Zero( nu, nx ) );
+    resize_mat_vec( q_uu_step, Eigen::MatrixXd::Zero( nu, nu ) );
+    resize_mat_vec( q_uu_reg_step, Eigen::MatrixXd::Zero( nu, nu ) );
+    resize_mat_vec( q_uu_inv_step, Eigen::MatrixXd::Zero( nu, nu ) );
+
+    // LLT factor objects -------------------------------------------------
+    if( static_cast<int>( llt_step.size() ) != T )
+      llt_step.assign( T, Eigen::LLT<Eigen::MatrixXd>( nu ) );
+
+    // Trial trajectories --------------------------------------------------
+    x_trial.resize( nx, T + 1 );
+    u_trial.resize( nu, T );
+
+    // Value function scratch & identity matrix ---------------------------
+    v_x.resize( nx );
+    v_xx.resize( nx, nx );
+    identity_nu = Eigen::MatrixXd::Identity( nu, nu );
+  }
+
+  //---------------- data members ---------------------------------------//
+  // — configuration
+  int    max_iterations;
+  double tolerance;
+  double max_ms;
+  bool   debug;
+
+  // — time-step dependent caches (size T)
+  std::vector<Eigen::VectorXd> k;        // nu
+  std::vector<Eigen::MatrixXd> k_matrix; // nu x nx
+
+  std::vector<Eigen::MatrixXd> a_step; // nx x nx
+  std::vector<Eigen::MatrixXd> b_step; // nx x nu
+
+  std::vector<Eigen::VectorXd> l_x_step;  // nx
+  std::vector<Eigen::VectorXd> l_u_step;  // nu
+  std::vector<Eigen::MatrixXd> l_xx_step; // nx x nx
+  std::vector<Eigen::MatrixXd> l_uu_step; // nu x nu
+  std::vector<Eigen::MatrixXd> l_ux_step; // nu x nx
+
+  std::vector<Eigen::VectorXd> q_x_step;      // nx
+  std::vector<Eigen::VectorXd> q_u_step;      // nu
+  std::vector<Eigen::MatrixXd> q_xx_step;     // nx x nx
+  std::vector<Eigen::MatrixXd> q_ux_step;     // nu x nx
+  std::vector<Eigen::MatrixXd> q_uu_step;     // nu x nu
+  std::vector<Eigen::MatrixXd> q_uu_reg_step; // nu x nu
+  std::vector<Eigen::MatrixXd> q_uu_inv_step; // nu x nu
+
+  std::vector<Eigen::LLT<Eigen::MatrixXd>> llt_step; // per-step factors
+
+  // — global scratch
+  StateTrajectory   x_trial; // nx x (T+1)
+  ControlTrajectory u_trial; // nu x T
+
+  Eigen::VectorXd v_x;         // nx
+  Eigen::MatrixXd v_xx;        // nx x nx
+  Eigen::MatrixXd identity_nu; // nu x nu
+};
+
+} // namespace mas

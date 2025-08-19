@@ -282,7 +282,8 @@ private:
 
     for( int t = 0; t <= T; ++t )
     {
-      const Eigen::MatrixXd Q = p.cost_state_hessian( p.stage_cost, x.col( t ), u.col( std::min( t, T - 1 ) ), t );
+      const Eigen::MatrixXd Q
+        = p.cost_state_hessian( p.stage_cost, x.col( t ), u.col( std::min( t, T - 1 ) ), t );
       for( int i = 0; i < nx; ++i )
       {
         const int idx = t * nx + i;
@@ -312,10 +313,12 @@ private:
 
     qp_data.gradient.setZero();
     for( int t = 0; t <= T; ++t )
-      qp_data.gradient.segment( t * nx, nx ) = p.cost_state_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
+      qp_data.gradient.segment( t * nx, nx )
+        = p.cost_state_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
 
     for( int t = 0; t < T; ++t )
-      qp_data.gradient.segment( ( T + 1 ) * nx + t * nu, nu ) = p.cost_control_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
+      qp_data.gradient.segment( ( T + 1 ) * nx + t * nu, nu )
+        = p.cost_control_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
   }
 
   //--------------------------------------------------------------------//

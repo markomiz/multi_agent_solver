@@ -11,45 +11,64 @@ namespace mas
 {
 
 // Types defined for clarity in other functions
-using State             = Eigen::VectorXd;
-using StateDerivative   = Eigen::VectorXd;
-using Control           = Eigen::VectorXd;
-using ControlTrajectory = Eigen::MatrixXd;
-using StateTrajectory   = Eigen::MatrixXd;
+template <typename Scalar = double>
+using State = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+template <typename Scalar = double>
+using StateDerivative = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+template <typename Scalar = double>
+using Control = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+template <typename Scalar = double>
+using ControlTrajectoryT = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+template <typename Scalar = double>
+using StateTrajectoryT = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+using ControlTrajectory = ControlTrajectoryT<>;
+using StateTrajectory   = StateTrajectoryT<>;
 
 // Dynamics
-using MotionModel = std::function<StateDerivative( const State&, const Control& )>;
+template <typename Scalar = double>
+using MotionModel =
+  std::function<StateDerivative<Scalar>( const State<Scalar>&, const Control<Scalar>& )>;
 
 // Cost Function
 using ObjectiveFunction = std::function<double( const StateTrajectory&, const ControlTrajectory& )>;
 
 // A stage cost is evaluated on a single (state, control) pair.
-using StageCostFunction = std::function<double( const State&, const Control&, size_t time_idx )>;
+template <typename Scalar = double>
+using StageCostFunction = std::function<Scalar( const State<Scalar>&, const Control<Scalar>&, size_t time_idx )>;
 // A terminal cost is evaluated on the final state.
-using TerminalCostFunction = std::function<double( const State& )>;
+template <typename Scalar = double>
+using TerminalCostFunction = std::function<Scalar( const State<Scalar>& )>;
 
 
 // Constraints
 using ConstraintViolations        = Eigen::VectorXd;
-using ConstraintsFunction         = std::function<ConstraintViolations( const State&, const Control& )>;
+using ConstraintsFunction         = std::function<ConstraintViolations( const State<>&, const Control<> )>;
 using ConstraintsJacobian         = Eigen::MatrixXd;
-using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const State&, const Control& )>;
+using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const State<>&, const Control<> )>;
 
 
 // Derivative interfaces
-using DynamicsStateJacobian   = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
-using DynamicsControlJacobian = std::function<Eigen::MatrixXd( const MotionModel& dynamics, const State&, const Control& )>;
-using CostStateGradient       = std::function<Eigen::VectorXd( const StageCostFunction&, const State&, const Control&, size_t )>;
-using CostControlGradient     = std::function<Eigen::VectorXd( const StageCostFunction&, const State&, const Control&, size_t )>;
-using CostStateHessian        = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
-using CostControlHessian      = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
-using CostCrossTerm           = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using DynamicsStateJacobian
+  = std::function<Eigen::MatrixXd( const MotionModel<>& dynamics, const State<>&, const Control<>& )>;
+using DynamicsControlJacobian
+  = std::function<Eigen::MatrixXd( const MotionModel<>& dynamics, const State<>&, const Control<>& )>;
+using CostStateGradient
+  = std::function<Eigen::VectorXd( const StageCostFunction<>&, const State<>&, const Control<>&, size_t )>;
+using CostControlGradient
+  = std::function<Eigen::VectorXd( const StageCostFunction<>&, const State<>&, const Control<>&, size_t )>;
+using CostStateHessian
+  = std::function<Eigen::MatrixXd( const StageCostFunction<>&, const State<>&, const Control<>&, size_t )>;
+using CostControlHessian
+  = std::function<Eigen::MatrixXd( const StageCostFunction<>&, const State<>&, const Control<>&, size_t )>;
+using CostCrossTerm
+  = std::function<Eigen::MatrixXd( const StageCostFunction<>&, const State<>&, const Control<>&, size_t )>;
 using ControlGradient         = Eigen::MatrixXd;
 
 // GradientComputer interface
 using GradientComputer
-  = std::function<ControlGradient( const State& initial_state, const ControlTrajectory& controls, const MotionModel& dynamics,
-                                   const ObjectiveFunction& objective_function, double timestep )>;
+  = std::function<ControlGradient( const State<>& initial_state, const ControlTrajectory& controls,
+                                   const MotionModel<>& dynamics, const ObjectiveFunction& objective_function,
+                                   double timestep )>;
 using SolverParams = std::unordered_map<std::string, double>;
 
 // ANSI Escape Codes for Colors

@@ -5,7 +5,6 @@
 #include <Eigen/Dense>
 
 #include "multi_agent_solver/constraint_helpers.hpp"
-#include "multi_agent_solver/finite_differences.hpp"
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -71,8 +70,9 @@ public:
         break;
       }
 
-      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics,
-                                                                     problem.objective_function, problem.dt );
+      const ControlGradient gradients
+        = problem.trajectory_gradient( problem.initial_state, controls, problem.dynamics, problem.objective_function,
+                                       problem.dt );
 
       const double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
                                                    problem.dt, {} );

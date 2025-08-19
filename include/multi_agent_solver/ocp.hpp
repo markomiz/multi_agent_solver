@@ -7,6 +7,9 @@
 
 #include "multi_agent_solver/finite_differences.hpp"
 #include "multi_agent_solver/types.hpp"
+#ifdef MAS_USE_AUTODIFF
+#include "multi_agent_solver/autodiff_derivatives.hpp"
+#endif
 
 namespace mas
 {
@@ -71,6 +74,7 @@ struct OCP
   CostStateHessian        cost_state_hessian;
   CostControlHessian      cost_control_hessian;
   CostCrossTerm           cost_cross_term;
+  GradientComputer        trajectory_gradient;
 
   size_t id = 0;
 
@@ -108,7 +112,30 @@ struct OCP
     best_controls = initial_controls;
 
 
-    // use finite differences when derivatives are not specified
+    // Select derivative implementations when not specified
+#ifdef MAS_USE_AUTODIFF
+    if( !dynamics_state_jacobian )
+      dynamics_state_jacobian = autodiff_dynamics_state_jacobian;
+    if( !dynamics_control_jacobian )
+      dynamics_control_jacobian = autodiff_dynamics_control_jacobian;
+    if( !cost_state_gradient )
+      cost_state_gradient = autodiff_cost_state_gradient;
+    if( !cost_control_gradient )
+      cost_control_gradient = autodiff_cost_control_gradient;
+    if( !cost_state_hessian )
+      cost_state_hessian = autodiff_cost_state_hessian;
+    if( !cost_control_hessian )
+      cost_control_hessian = autodiff_cost_control_hessian;
+    if( !cost_cross_term )
+      cost_cross_term = autodiff_cost_cross_term;
+    if( !trajectory_gradient )
+    {
+      trajectory_gradient = [this]( const State<>& x0, const ControlTrajectory& u, const MotionModel<>& dyn,
+                                    const ObjectiveFunction& /*obj*/, double timestep ) {
+        return autodiff_trajectory_gradient( x0, u, dyn, stage_cost, terminal_cost, timestep );
+      };
+    }
+#else
     if( !dynamics_state_jacobian )
       dynamics_state_jacobian = compute_dynamics_state_jacobian;
     if( !dynamics_control_jacobian )
@@ -123,6 +150,9 @@ struct OCP
       cost_control_hessian = compute_cost_control_hessian;
     if( !cost_cross_term )
       cost_cross_term = compute_cost_cross_term;
+    if( !trajectory_gradient )
+      trajectory_gradient = finite_differences_gradient;
+#endif
 
     if( !objective_function && stage_cost && terminal_cost )
     {

@@ -221,9 +221,11 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 {
   qp.g.setZero();
   for( int t = 1; t <= T; ++t )
-    qp.g.segment( id_state( t, 0, nx ), nx ) = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
+    qp.g.segment( id_state( t, 0, nx ), nx )
+      = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
   for( int t = 0; t < T; ++t )
-    qp.g.segment( id_control( t, nx, nu, T ), nu ) = p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
+    qp.g.segment( id_control( t, nx, nu, T ), nu )
+      = p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
 
   double*     h_val = qp.H.valuePtr();
   std::size_t kH    = 0;

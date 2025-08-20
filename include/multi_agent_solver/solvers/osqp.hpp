@@ -80,7 +80,7 @@ public:
 
 
     states = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
-    cost   = problem.objective_function( states, controls );
+    cost   = to_double( problem.objective_function( states, controls ) );
 
 
     double reg = 0.0;
@@ -172,7 +172,7 @@ public:
 
       u_new                 = controls - alpha * d_u;
       states_new            = integrate_horizon( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4 );
-      const double cost_new = problem.objective_function( states_new, u_new );
+      const double cost_new = to_double( problem.objective_function( states_new, u_new ) );
 
       if( std::abs( cost - cost_new ) < tolerance )
       {

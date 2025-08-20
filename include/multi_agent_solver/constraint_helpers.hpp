@@ -4,7 +4,6 @@
 
 #include <Eigen/Dense>
 
-#include "multi_agent_solver/finite_differences.hpp"
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -19,21 +18,21 @@ compute_augmented_cost( const OCP& problem, const ConstraintViolations& equality
                         const ConstraintViolations& inequality_multipliers, double penalty_parameter, const StateTrajectory& states,
                         const ControlTrajectory& controls )
 {
-  double cost = problem.objective_function( states, controls );
+  double cost = to_double( problem.objective_function( states, controls ) );
 
   for( int t = 0; t < controls.cols(); ++t )
   {
     if( problem.equality_constraints )
     {
-      ConstraintViolations eq_residuals  = problem.equality_constraints( states.col( t ), controls.col( t ) );
-      cost                              += equality_multipliers.dot( eq_residuals ) + 0.5 * penalty_parameter * eq_residuals.squaredNorm();
+      ConstraintViolations eq_residuals = problem.equality_constraints( states.col( t ), controls.col( t ) );
+      cost += to_double( equality_multipliers.dot( eq_residuals ) ) + 0.5 * penalty_parameter * to_double( eq_residuals.squaredNorm() );
     }
 
     if( problem.inequality_constraints )
     {
-      ConstraintViolations ineq_residuals  = problem.inequality_constraints( states.col( t ), controls.col( t ) );
-      ConstraintViolations slack           = ( ineq_residuals.array() > 0 ).select( ineq_residuals, 0 );
-      cost                                += inequality_multipliers.dot( slack ) + 0.5 * penalty_parameter * slack.squaredNorm();
+      ConstraintViolations ineq_residuals = problem.inequality_constraints( states.col( t ), controls.col( t ) );
+      ConstraintViolations slack          = ( ineq_residuals.array() > 0 ).select( ineq_residuals, 0 );
+      cost += to_double( inequality_multipliers.dot( slack ) ) + 0.5 * penalty_parameter * to_double( slack.squaredNorm() );
     }
   }
 
@@ -74,11 +73,11 @@ increase_penalty_parameter( double& penalty_parameter, const OCP& problem, const
   {
     if( problem.equality_constraints )
     {
-      eq_violation_norm += problem.equality_constraints( states.col( t ), controls.col( t ) ).squaredNorm();
+      eq_violation_norm += to_double( problem.equality_constraints( states.col( t ), controls.col( t ) ).squaredNorm() );
     }
     if( problem.inequality_constraints )
     {
-      ineq_violation_norm += problem.inequality_constraints( states.col( t ), controls.col( t ) ).cwiseMax( 0 ).squaredNorm();
+      ineq_violation_norm += to_double( problem.inequality_constraints( states.col( t ), controls.col( t ) ).cwiseMax( 0 ).squaredNorm() );
     }
   }
 
@@ -99,4 +98,4 @@ clamp_controls( ControlTrajectory& controls, const Control& lower_limit, const C
     controls.col( t ) = controls.col( t ).cwiseMin( upper_limit ).cwiseMax( lower_limit );
   }
 }
-}
+} // namespace mas

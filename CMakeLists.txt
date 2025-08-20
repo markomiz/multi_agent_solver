@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_EXAMPLES "Build example executables" ON)
 option(BUILD_SHARED_LIBS "Build as shared library" OFF)
+option(MAS_USE_AUTODIFF "Enable autodifferentiation support" OFF)
 
 # Dependencies
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
@@ -27,6 +28,17 @@ target_link_libraries(MultiAgentSolver INTERFACE
   osqp::osqp
   OpenMP::OpenMP_CXX
 )
+
+if(MAS_USE_AUTODIFF)
+  include(FetchContent)
+  FetchContent_Declare(autodiff
+    GIT_REPOSITORY https://github.com/autodiff/autodiff.git
+    GIT_TAG v1.0.1
+  )
+  FetchContent_MakeAvailable(autodiff)
+  target_link_libraries(MultiAgentSolver INTERFACE autodiff::autodiff)
+  target_compile_definitions(MultiAgentSolver INTERFACE MAS_USE_AUTODIFF)
+endif()
 
 # Optional examples
 if(BUILD_EXAMPLES)

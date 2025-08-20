@@ -1,6 +1,5 @@
 #pragma once
 #include "multi_agent_solver/constraint_helpers.hpp"
-#include "multi_agent_solver/finite_differences.hpp"
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/models/single_track_model.hpp"

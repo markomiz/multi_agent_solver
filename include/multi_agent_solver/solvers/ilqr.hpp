@@ -61,7 +61,7 @@ public:
 
     // ---------- initial rollout & cost ----------------------------------
     x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
-    cost = problem.objective_function( x, u );
+    cost = to_double( problem.objective_function( x, u ) );
     if( debug )
       std::cerr << "2 initial cost: " << cost << '\n';
 
@@ -147,7 +147,7 @@ public:
           x_trial.col( t + 1 ) = integrate_rk4( x_trial.col( t ), u_trial.col( t ), dt, problem.dynamics );
         }
 
-        const double new_cost = problem.objective_function( x_trial, u_trial );
+        const double new_cost = to_double( problem.objective_function( x_trial, u_trial ) );
         if( new_cost < best_cost )
         {
           best_cost = new_cost;

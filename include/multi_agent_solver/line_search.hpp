@@ -38,7 +38,7 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
   double c1                = get_parameter( parameters, "c1", 1e-6 );
 
   double alpha    = initial_step_size;
-  double cost_ref = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
+  double cost_ref = to_double( objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls ) );
 
   // The search direction is the negative gradient, so grad^T * (-grad)
   // should be negative. The Armijo condition expects f(x + alpha p)
@@ -52,7 +52,7 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
     // Compute trial controls and cost
     ControlTrajectory trial_controls   = controls - alpha * gradients;
     StateTrajectory   trial_trajectory = integrate_horizon( initial_state, trial_controls, dt, dynamics, integrate_rk4 );
-    double            trial_cost       = objective_function( trial_trajectory, trial_controls );
+    double            trial_cost       = to_double( objective_function( trial_trajectory, trial_controls ) );
 
     // Check Armijo condition. directional_derivative is negative, so the
     // right-hand side is less than cost_ref when a descent direction is
@@ -86,14 +86,14 @@ backtracking_line_search( const State& initial_state, const ControlTrajectory& c
   double beta              = get_parameter( parameters, "beta", 0.5 );
 
   double alpha    = initial_step_size;
-  double cost_ref = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
+  double cost_ref = to_double( objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls ) );
 
   while( true )
   {
     // Compute trial controls and cost
     ControlTrajectory trial_controls   = controls - alpha * gradients;
     StateTrajectory   trial_trajectory = integrate_horizon( initial_state, trial_controls, dt, dynamics, integrate_rk4 );
-    double            trial_cost       = objective_function( trial_trajectory, trial_controls );
+    double            trial_cost       = to_double( objective_function( trial_trajectory, trial_controls ) );
 
     // Check if cost decreased
     if( trial_cost < cost_ref )
@@ -123,4 +123,4 @@ constant_line_search( const State& /*initial_state*/, const ControlTrajectory& /
 
   return get_parameter( parameters, "step_size", 0.1 );
 }
-}
+} // namespace mas

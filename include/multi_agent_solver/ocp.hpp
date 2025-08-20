@@ -21,9 +21,9 @@ compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, c
   double cost = 0.0;
   for( int t = 0; t < T; ++t )
   {
-    cost += stage_cost( X.col( t ), U.col( t ), t );
+    cost += to_double( stage_cost( X.col( t ), U.col( t ), t ) );
   }
-  cost += terminal_cost( X.col( Tp1 - 1 ) );
+  cost += to_double( terminal_cost( X.col( Tp1 - 1 ) ) );
   return cost;
 }
 
@@ -84,7 +84,7 @@ struct OCP
     best_states   = initial_states;
     best_controls = initial_controls;
 
-    best_cost = objective_function( initial_states, initial_controls );
+    best_cost = to_double( objective_function( initial_states, initial_controls ) );
   }
 
   void
@@ -129,11 +129,11 @@ struct OCP
       auto stage_cost_local    = stage_cost;
       auto terminal_cost_local = terminal_cost;
       objective_function       = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,
-                                                                    const ControlTrajectory& controls ) -> double {
+                                                                    const ControlTrajectory& controls ) -> Scalar {
         return compute_trajectory_cost( states, controls, stage_cost_local, terminal_cost_local );
       };
     }
-    best_cost = objective_function( initial_states, initial_controls );
+    best_cost = to_double( objective_function( initial_states, initial_controls ) );
   }
 
   // Verify that the problem's dimensions and outputs are consistent
@@ -172,7 +172,7 @@ struct OCP
     assert( dynamics_output.size() == state_dim && "Dynamics output size mismatch" );
 
     // Test objective function
-    double cost = objective_function( best_states, best_controls );
+    double cost = to_double( objective_function( best_states, best_controls ) );
 
     // If constraints exist, test them
     if( inequality_constraints )

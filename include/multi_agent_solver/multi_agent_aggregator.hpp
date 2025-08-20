@@ -396,8 +396,8 @@ private:
   void
   setup_objective_function( OCP& global_ocp ) const
   {
-    global_ocp.stage_cost = [this]( const State& full_x, const Control& full_u, size_t time_index ) -> double {
-      double total_cost = 0.0;
+    global_ocp.stage_cost = [this]( const State& full_x, const Control& full_u, size_t time_index ) -> Scalar {
+      Scalar total_cost = 0.0;
 
       if( !use_only_global_cost_and_constraints )
       {
@@ -418,8 +418,8 @@ private:
       return total_cost;
     };
 
-    global_ocp.terminal_cost = [this]( const State& full_x ) -> double {
-      double total_cost = 0.0;
+    global_ocp.terminal_cost = [this]( const State& full_x ) -> Scalar {
+      Scalar total_cost = 0.0;
 
       if( !use_only_global_cost_and_constraints )
       {

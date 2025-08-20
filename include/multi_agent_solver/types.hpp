@@ -7,32 +7,44 @@
 
 #include <Eigen/Dense>
 
+#ifdef MAS_USE_AUTODIFF
+  #include <autodiff/forward/dual.hpp>
+  #include <autodiff/forward/dual/eigen.hpp>
+#endif
+
 namespace mas
 {
 
+// Select scalar type: plain double by default or autodiff dual numbers.
+#ifdef MAS_USE_AUTODIFF
+using Scalar = autodiff::dual;
+#else
+using Scalar = double;
+#endif
+
 // Types defined for clarity in other functions
-using State             = Eigen::VectorXd;
-using StateDerivative   = Eigen::VectorXd;
-using Control           = Eigen::VectorXd;
-using ControlTrajectory = Eigen::MatrixXd;
-using StateTrajectory   = Eigen::MatrixXd;
+using State             = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+using StateDerivative   = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+using Control           = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+using ControlTrajectory = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+using StateTrajectory   = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
 
 // Dynamics
 using MotionModel = std::function<StateDerivative( const State&, const Control& )>;
 
 // Cost Function
-using ObjectiveFunction = std::function<double( const StateTrajectory&, const ControlTrajectory& )>;
+using ObjectiveFunction = std::function<Scalar( const StateTrajectory&, const ControlTrajectory& )>;
 
 // A stage cost is evaluated on a single (state, control) pair.
-using StageCostFunction = std::function<double( const State&, const Control&, size_t time_idx )>;
+using StageCostFunction = std::function<Scalar( const State&, const Control&, size_t time_idx )>;
 // A terminal cost is evaluated on the final state.
-using TerminalCostFunction = std::function<double( const State& )>;
+using TerminalCostFunction = std::function<Scalar( const State& )>;
 
 
 // Constraints
-using ConstraintViolations        = Eigen::VectorXd;
+using ConstraintViolations        = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
 using ConstraintsFunction         = std::function<ConstraintViolations( const State&, const Control& )>;
-using ConstraintsJacobian         = Eigen::MatrixXd;
+using ConstraintsJacobian         = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
 using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const State&, const Control& )>;
 
 
@@ -51,6 +63,17 @@ using GradientComputer
   = std::function<ControlGradient( const State& initial_state, const ControlTrajectory& controls, const MotionModel& dynamics,
                                    const ObjectiveFunction& objective_function, double timestep )>;
 using SolverParams = std::unordered_map<std::string, double>;
+
+// Utility to extract a double from Scalar (works for both double and autodiff types)
+inline double
+to_double( const Scalar& x )
+{
+#ifdef MAS_USE_AUTODIFF
+  return autodiff::val( x );
+#else
+  return x;
+#endif
+}
 
 // ANSI Escape Codes for Colors
 namespace print_color

@@ -23,7 +23,7 @@ finite_differences_gradient( const State& initial_state, const ControlTrajectory
   ControlTrajectory controls_plus  = controls;
 
   StateTrajectory trajectory_minus = integrate_horizon( initial_state, controls_minus, dt, dynamics, integrate_rk4 );
-  double          cost_minus       = objective_function( trajectory_minus, controls_minus );
+  double          cost_minus       = to_double( objective_function( trajectory_minus, controls_minus ) );
 
   for( int t = 0; t < controls.cols(); ++t )
   {
@@ -34,12 +34,12 @@ finite_differences_gradient( const State& initial_state, const ControlTrajectory
       controls_plus                    = controls;
       controls_plus( i, t )           += epsilon;
       StateTrajectory trajectory_plus  = integrate_horizon( initial_state, controls_plus, dt, dynamics, integrate_rk4 );
-      double          cost_plus        = objective_function( trajectory_plus, controls_plus );
+      double          cost_plus        = to_double( objective_function( trajectory_plus, controls_plus ) );
 
       controls_minus          = controls;
       controls_minus( i, t ) -= epsilon;
       trajectory_minus        = integrate_horizon( initial_state, controls_minus, dt, dynamics, integrate_rk4 );
-      cost_minus              = objective_function( trajectory_minus, controls_minus );
+      cost_minus              = to_double( objective_function( trajectory_minus, controls_minus ) );
 
       gradients( i, t ) = ( cost_plus - cost_minus ) / ( 2 * epsilon );
     }
@@ -65,7 +65,7 @@ compute_dynamics_state_jacobian( const MotionModel& dynamics, const State& x, co
     State f_plus  = dynamics( x + dx, u );
     State f_minus = dynamics( x - dx, u );
 
-    A.col( i ) = ( f_plus - f_minus ) / ( 2 * epsilon );
+    A.col( i ) = ( ( f_plus - f_minus ) / ( 2 * epsilon ) ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
   }
   return A;
 }
@@ -86,7 +86,7 @@ compute_dynamics_control_jacobian( const MotionModel& dynamics, const State& x, 
     State f_plus  = dynamics( x, u + du );
     State f_minus = dynamics( x, u - du );
 
-    B.col( i ) = ( f_plus - f_minus ) / ( 2 * epsilon );
+    B.col( i ) = ( ( f_plus - f_minus ) / ( 2 * epsilon ) ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
   }
   return B;
 }
@@ -95,7 +95,7 @@ compute_dynamics_control_jacobian( const MotionModel& dynamics, const State& x, 
 inline double
 safe_eval( const StageCostFunction& stage_cost, const State& x, const Control& u, size_t time_idx )
 {
-  double value = stage_cost( x, u, time_idx );
+  double value = to_double( stage_cost( x, u, time_idx ) );
   return std::isfinite( value ) ? value : 0.0;
 }
 
@@ -109,7 +109,7 @@ compute_cost_state_gradient( const StageCostFunction& stage_cost, const State& x
   {
     State dx  = State::Zero( x.size() );
     dx( i )   = epsilon;
-    grad( i ) = ( stage_cost( x + dx, u, time_idx ) - stage_cost( x - dx, u, time_idx ) ) / ( 2 * epsilon );
+    grad( i ) = ( to_double( stage_cost( x + dx, u, time_idx ) ) - to_double( stage_cost( x - dx, u, time_idx ) ) ) / ( 2 * epsilon );
   }
   return grad;
 }
@@ -123,7 +123,7 @@ compute_cost_control_gradient( const StageCostFunction& stage_cost, const State&
   {
     Control du = Control::Zero( u.size() );
     du( i )    = epsilon;
-    grad( i )  = ( stage_cost( x, u + du, time_idx ) - stage_cost( x, u - du, time_idx ) ) / ( 2 * epsilon );
+    grad( i )  = ( to_double( stage_cost( x, u + du, time_idx ) ) - to_double( stage_cost( x, u - du, time_idx ) ) ) / ( 2 * epsilon );
   }
   return grad;
 }

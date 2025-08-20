@@ -166,9 +166,11 @@ public:
         u_candidate.col( t ) = solution.segment( Ns * nx + t * nu, nu );
 
       d_u = controls - u_candidate;
+      ControlGradient d_u_double
+        = d_u.unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
 
-      const double alpha = armijo_line_search( problem.initial_state, controls, d_u, problem.dynamics, problem.objective_function,
-                                               problem.dt, ls_parameters );
+      const double alpha = armijo_line_search( problem.initial_state, controls, d_u_double, problem.dynamics,
+                                               problem.objective_function, problem.dt, ls_parameters );
 
       u_new                 = controls - alpha * d_u;
       states_new            = integrate_horizon( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4 );
@@ -381,8 +383,10 @@ private:
       for( int i = 0; i < nx; ++i )
       {
         const int idx     = sb_off + t * nx + i;
-        qp_data.lb( idx ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) : OsqpEigen::INFTY;
+        qp_data.lb( idx )
+          = p.state_lower_bounds ? to_double( ( *p.state_lower_bounds )( i ) ) : -OsqpEigen::INFTY;
+        qp_data.ub( idx )
+          = p.state_upper_bounds ? to_double( ( *p.state_upper_bounds )( i ) ) : OsqpEigen::INFTY;
       }
 
 
@@ -391,8 +395,10 @@ private:
       for( int i = 0; i < nu; ++i )
       {
         const int idx     = cb_off + t * nu + i;
-        qp_data.lb( idx ) = p.input_lower_bounds ? ( *p.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( idx ) = p.input_upper_bounds ? ( *p.input_upper_bounds )( i ) : OsqpEigen::INFTY;
+        qp_data.lb( idx )
+          = p.input_lower_bounds ? to_double( ( *p.input_lower_bounds )( i ) ) : -OsqpEigen::INFTY;
+        qp_data.ub( idx )
+          = p.input_upper_bounds ? to_double( ( *p.input_upper_bounds )( i ) ) : OsqpEigen::INFTY;
       }
   }
 

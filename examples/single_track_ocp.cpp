@@ -41,12 +41,12 @@ create_single_track_lane_following_ocp()
   // Stage cost function.
   problem.stage_cost = [=]( const State& state, const Control& control, size_t idx ) -> double {
     // Unpack state: we only use Y (index 1) and vx (index 3).
-    double y  = state( 1 );
-    double vx = state( 3 );
+    double y  = to_double( state( 1 ) );
+    double vx = to_double( state( 3 ) );
 
     // Unpack control: steering delta and acceleration.
-    double delta = control( 0 );
-    double a_cmd = control( 1 );
+    double delta = to_double( control( 0 ) );
+    double a_cmd = to_double( control( 1 ) );
 
     // Compute errors.
     double lane_error  = y;
@@ -64,8 +64,8 @@ create_single_track_lane_following_ocp()
   problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control&, size_t time_idx ) -> Eigen::VectorXd {
     Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
     // Only Y (index 1) and vx (index 3) appear in the cost.
-    grad( 1 ) = 2.0 * w_lane * state( 1 );
-    grad( 3 ) = 2.0 * w_speed * ( state( 3 ) - desired_velocity );
+    grad( 1 ) = 2.0 * w_lane * to_double( state( 1 ) );
+    grad( 3 ) = 2.0 * w_speed * ( to_double( state( 3 ) ) - desired_velocity );
     return grad;
   };
 
@@ -73,8 +73,8 @@ create_single_track_lane_following_ocp()
   problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control,
                                        size_t time_idx ) -> Eigen::VectorXd {
     Eigen::VectorXd grad = Eigen::VectorXd::Zero( control.size() );
-    grad( 0 )            = 2.0 * w_delta * control( 0 );
-    grad( 1 )            = 2.0 * w_acc * control( 1 );
+    grad( 0 )            = 2.0 * w_delta * to_double( control( 0 ) );
+    grad( 1 )            = 2.0 * w_acc * to_double( control( 1 ) );
     return grad;
   };
 

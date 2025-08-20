@@ -10,6 +10,7 @@
 #include "multi_agent_solver/multi_agent_aggregator.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
+#include "multi_agent_solver/types.hpp"
 
 mas::OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int agent_id,
@@ -45,14 +46,14 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
     const double w_separation = 0.0;
 
     // Extract states
-    double x   = state( 0 );
-    double y   = state( 1 );
-    double psi = state( 2 );
-    double vx  = state( 3 );
+    double x   = to_double( state( 0 ) );
+    double y   = to_double( state( 1 ) );
+    double psi = to_double( state( 2 ) );
+    double vx  = to_double( state( 3 ) );
 
     // Extract controls
-    double delta = control( 0 );
-    double a_cmd = control( 1 );
+    double delta = to_double( control( 0 ) );
+    double a_cmd = to_double( control( 1 ) );
 
     // Compute deviation from circular path
     double distance_from_track = std::abs( std::sqrt( x * x + y * y ) - 20 );

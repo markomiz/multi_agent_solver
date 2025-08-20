@@ -3,6 +3,7 @@
 
 #include "multi_agent_solver/types.hpp"
 
+
 /**
  * @brief Single-track kinematic bicycle model **with time as a state**.
  *
@@ -23,21 +24,27 @@ namespace mas
 inline StateDerivative
 single_track_model( const State& x, const Control& u )
 {
-  double psi = x( 2 );
-  double v   = x( 3 );
+  Scalar psi = x( 2 );
+  Scalar v   = x( 3 );
 
   // Unpack controls
-  double delta = u( 0 );
-  double a     = u( 1 );
+  Scalar delta = u( 0 );
+  Scalar a     = u( 1 );
 
   // Vehicle parameters
   const double L = 2.5; // Wheelbase length [m]
 
   // Compute derivatives
   StateDerivative dxdt( 4 );
+#ifdef MAS_USE_AUTODIFF
+  dxdt( 0 ) = v * autodiff::detail::cos( psi );       // X_dot
+  dxdt( 1 ) = v * autodiff::detail::sin( psi );       // Y_dot
+  dxdt( 2 ) = v * autodiff::detail::tan( delta ) / L; // Psi_dot
+#else
   dxdt( 0 ) = v * std::cos( psi );       // X_dot
   dxdt( 1 ) = v * std::sin( psi );       // Y_dot
   dxdt( 2 ) = v * std::tan( delta ) / L; // Psi_dot
+#endif
   dxdt( 3 ) = a;                         // v_dot
 
   return dxdt;
@@ -49,17 +56,26 @@ single_track_model( const State& x, const Control& u )
 inline Eigen::MatrixXd
 single_track_state_jacobian( const State& x, const Control& u )
 {
-  double       psi   = x( 2 );
-  double       v     = x( 3 );
-  double       delta = u( 0 );
+  double       psi   = to_double( x( 2 ) );
+  double       v     = to_double( x( 3 ) );
+  double       delta = to_double( u( 0 ) );
   const double L     = 2.5; // Wheelbase
 
   Eigen::MatrixXd A = Eigen::MatrixXd::Zero( 4, 4 );
-  A( 0, 2 )         = -v * std::sin( psi );  // ∂X_dot / ∂psi
-  A( 0, 3 )         = std::cos( psi );       // ∂X_dot / ∂v
-  A( 1, 2 )         = v * std::cos( psi );   // ∂Y_dot / ∂psi
-  A( 1, 3 )         = std::sin( psi );       // ∂Y_dot / ∂v
-  A( 2, 3 )         = std::tan( delta ) / L; // ∂psi_dot / ∂v
+  A( 0, 2 )
+#ifdef MAS_USE_AUTODIFF
+    = -v * autodiff::detail::sin( psi );
+  A( 0, 3 ) = autodiff::detail::cos( psi );
+  A( 1, 2 ) = v * autodiff::detail::cos( psi );
+  A( 1, 3 ) = autodiff::detail::sin( psi );
+  A( 2, 3 ) = autodiff::detail::tan( delta ) / L;
+#else
+    = -v * std::sin( psi );
+  A( 0, 3 ) = std::cos( psi );
+  A( 1, 2 ) = v * std::cos( psi );
+  A( 1, 3 ) = std::sin( psi );
+  A( 2, 3 ) = std::tan( delta ) / L;
+#endif
 
   return A;
 }
@@ -70,12 +86,17 @@ single_track_state_jacobian( const State& x, const Control& u )
 inline Eigen::MatrixXd
 single_track_control_jacobian( const State& x, const Control& u )
 {
-  double       v     = x( 3 );
-  double       delta = u( 0 );
+  double       v     = to_double( x( 3 ) );
+  double       delta = to_double( u( 0 ) );
   const double L     = 2.5;
 
   Eigen::MatrixXd B = Eigen::MatrixXd::Zero( 4, 2 );
-  B( 2, 0 )         = v / ( L * std::cos( delta ) * std::cos( delta ) ); // ∂psi_dot / ∂delta
+  B( 2, 0 )
+#ifdef MAS_USE_AUTODIFF
+    = v / ( L * autodiff::detail::cos( delta ) * autodiff::detail::cos( delta ) );
+#else
+    = v / ( L * std::cos( delta ) * std::cos( delta ) );
+#endif // MAS_USE_AUTODIFF
   B( 3, 1 )         = 1.0;                                               // ∂v_dot / ∂a
 
   return B;

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <cmath>
 
 #include <Eigen/Dense>
 
@@ -29,7 +30,8 @@ finite_differences_gradient( const State& initial_state, const ControlTrajectory
   {
     for( int i = 0; i < controls.rows(); ++i )
     {
-      double epsilon = std::max( 1e-6, 1e-8 * std::abs( controls( i, t ) ) );
+      // Use raw double value for epsilon to avoid issues with autodiff types
+      double epsilon = std::max( 1e-6, 1e-8 * std::abs( to_double( controls( i, t ) ) ) );
 
       controls_plus                    = controls;
       controls_plus( i, t )           += epsilon;

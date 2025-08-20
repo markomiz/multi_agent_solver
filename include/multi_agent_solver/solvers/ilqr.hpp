@@ -138,8 +138,9 @@ public:
       {
         for( int t = 0; t < T; ++t )
         {
-          const Eigen::VectorXd dx = x_trial.col( t ) - x.col( t );
-          u_trial.col( t )         = u.col( t ) + alpha * k[t] + k_matrix[t] * dx;
+          const Eigen::VectorXd dx
+            = ( x_trial.col( t ) - x.col( t ) ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
+          u_trial.col( t ) = u.col( t ) + alpha * k[t] + k_matrix[t] * dx;
 
           if( problem.input_lower_bounds && problem.input_upper_bounds )
             clamp_controls( u_trial, *problem.input_lower_bounds, *problem.input_upper_bounds );

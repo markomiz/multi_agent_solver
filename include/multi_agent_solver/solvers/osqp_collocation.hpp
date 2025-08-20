@@ -322,7 +322,7 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
     {
       Fx_cache[t] = p.dynamics_state_jacobian( p.dynamics, x, u );
       Fu_cache[t] = p.dynamics_control_jacobian( p.dynamics, x, u );
-      f_cache[t]  = p.dynamics( x, u );
+        f_cache[t] = p.dynamics( x, u ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
     }
   }
 
@@ -337,9 +337,11 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
     const auto& f_t    = f_cache[t];
     const auto& f_tp1  = f_cache[t + 1];
 
-    const auto defect         = X.col( t + 1 ) - X.col( t ) - 0.5 * p.dt * ( f_t + f_tp1 );
-    qp.lb.segment( row0, nx ) = -defect;
-    qp.ub.segment( row0, nx ) = -defect;
+      const auto defect = X.col( t + 1 ) - X.col( t ) - 0.5 * p.dt * ( f_t + f_tp1 );
+      qp.lb.segment( row0, nx )
+        = ( -defect ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
+      qp.ub.segment( row0, nx )
+        = ( -defect ).unaryExpr( []( const Scalar& s ) { return to_double( s ); } );
 
     for( int i = 0; i < nx; ++i )
     {
@@ -374,9 +376,11 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
     const auto xr = X.col( t );
     for( int i = 0; i < nx; ++i )
     {
-      int idx      = sb_off + ( t - 1 ) * nx + i;
-      qp.lb( idx ) = p.state_lower_bounds ? ( *p.state_lower_bounds - xr )( i ) : -OsqpEigen::INFTY;
-      qp.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds - xr )( i ) : OsqpEigen::INFTY;
+      int idx = sb_off + ( t - 1 ) * nx + i;
+      qp.lb( idx )
+        = p.state_lower_bounds ? to_double( ( *p.state_lower_bounds - xr )( i ) ) : -OsqpEigen::INFTY;
+      qp.ub( idx )
+        = p.state_upper_bounds ? to_double( ( *p.state_upper_bounds - xr )( i ) ) : OsqpEigen::INFTY;
     }
   }
 
@@ -385,9 +389,11 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
     const auto ur = U.col( t );
     for( int i = 0; i < nu; ++i )
     {
-      int idx      = cb_off + t * nu + i;
-      qp.lb( idx ) = p.input_lower_bounds ? ( *p.input_lower_bounds - ur )( i ) : -OsqpEigen::INFTY;
-      qp.ub( idx ) = p.input_upper_bounds ? ( *p.input_upper_bounds - ur )( i ) : OsqpEigen::INFTY;
+      int idx = cb_off + t * nu + i;
+      qp.lb( idx )
+        = p.input_lower_bounds ? to_double( ( *p.input_lower_bounds - ur )( i ) ) : -OsqpEigen::INFTY;
+      qp.ub( idx )
+        = p.input_upper_bounds ? to_double( ( *p.input_upper_bounds - ur )( i ) ) : OsqpEigen::INFTY;
     }
   }
 

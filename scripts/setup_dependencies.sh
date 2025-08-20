@@ -27,4 +27,17 @@ make install
 cd /
 rm -rf /tmp/osqp-eigen
 
-echo "✅ OSQP installed successfully."
+echo "🔽 Cloning autodiff repository..."
+git clone https://github.com/autodiff/autodiff.git /tmp/autodiff
+cd /tmp/autodiff
+mkdir build && cd build
+cmake -G "Unix Makefiles" .. \
+    -DAUTODIFF_BUILD_TESTS=OFF \
+    -DAUTODIFF_BUILD_PYTHON=OFF \
+    -DAUTODIFF_BUILD_EXAMPLES=OFF \
+    -DAUTODIFF_BUILD_DOCS=OFF
+cmake --build . --target install
+cd /
+rm -rf /tmp/autodiff
+
+echo "✅ Dependencies installed successfully."

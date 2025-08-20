@@ -30,12 +30,7 @@ target_link_libraries(MultiAgentSolver INTERFACE
 )
 
 if(MAS_USE_AUTODIFF)
-  include(FetchContent)
-  FetchContent_Declare(autodiff
-    GIT_REPOSITORY https://github.com/autodiff/autodiff.git
-    GIT_TAG v1.0.1
-  )
-  FetchContent_MakeAvailable(autodiff)
+  find_package(autodiff REQUIRED CONFIG)
   target_link_libraries(MultiAgentSolver INTERFACE autodiff::autodiff)
   target_compile_definitions(MultiAgentSolver INTERFACE MAS_USE_AUTODIFF)
 endif()

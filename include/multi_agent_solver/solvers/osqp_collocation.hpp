@@ -79,6 +79,17 @@ private:
   bool   debug{ false };
 
   double max_ms{ 1000.0 }; // max time in ms
+
+  /* caching ----------------------------------------------------- */
+  bool                         use_cache{ true };
+  bool                         cache_valid{ false };
+  StateTrajectory              X_prev;
+  ControlTrajectory            U_prev;
+  std::vector<Eigen::MatrixXd> Fx_cache; // size T+1
+  std::vector<Eigen::MatrixXd> Fu_cache; // size T+1
+  std::vector<Eigen::VectorXd> f_cache;  // size T+1
+  std::vector<Eigen::MatrixXd> Q_cache;  // size T+1
+  std::vector<Eigen::MatrixXd> R_cache;  // size T
 };
 
 /* =================================================================== */
@@ -91,6 +102,7 @@ OSQPCollocation::set_params( const SolverParams& p )
   tolerance = p.at( "tolerance" );
   debug     = p.count( "debug" ) && p.at( "debug" ) > 0.5;
   max_ms    = p.count( "max_ms" ) ? p.at( "max_ms" ) : 1000.0;
+  use_cache = p.count( "cache" ) ? p.at( "cache" ) > 0.5 : true;
   solver->settings()->setVerbosity( false );
   solver->settings()->setWarmStart( true );
   solver->settings()->setAdaptiveRho( true );
@@ -201,6 +213,18 @@ OSQPCollocation::prepare_structure( const OCP& p )
         A_dyn_idx.push_back( idx );
   }
 
+  if( use_cache )
+  {
+    X_prev.setZero( nx, T + 1 );
+    U_prev.setZero( nu, T );
+    Fx_cache.assign( T + 1, Eigen::MatrixXd::Zero( nx, nx ) );
+    Fu_cache.assign( T + 1, Eigen::MatrixXd::Zero( nx, nu ) );
+    f_cache.assign( T + 1, Eigen::VectorXd::Zero( nx ) );
+    Q_cache.assign( T + 1, Eigen::MatrixXd::Zero( nx, nx ) );
+    R_cache.assign( T, Eigen::MatrixXd::Zero( nu, nu ) );
+    cache_valid = false;
+  }
+
   /* ---------- hand everything to OSQP once ---------------------- */
   solver->data()->setNumberOfVariables( qp_dim );
   solver->data()->setNumberOfConstraints( qp.A.rows() );
@@ -228,69 +252,96 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
   double*     h_val = qp.H.valuePtr();
   std::size_t kH    = 0;
 
+  constexpr double cache_eps = 1e-9;
+
   for( int t = 1; t <= T; ++t )
   {
-    auto Q = p.cost_state_hessian( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
-    if( !Q.allFinite() )
-      std::cerr << "[Warning] Non-finite Q at t=" << t << "\n";
+    const auto x = X.col( t );
+    const auto u = U.col( std::min( t, T - 1 ) );
+    bool       recompute = !use_cache || !cache_valid ||
+                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
+                           ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
 
-    double min_diag = Q.diagonal().minCoeff();
-    if( min_diag + reg < 0.0 )
+    if( recompute )
     {
-      double lambda         = std::abs( min_diag ) + reg;
-      Q.diagonal().array() += lambda;
+      auto Q = p.cost_state_hessian( p.stage_cost, x, u, t );
+      if( !Q.allFinite() )
+        std::cerr << "[Warning] Non-finite Q at t=" << t << "\n";
+
+      double min_diag = Q.diagonal().minCoeff();
+      if( min_diag + reg < 0.0 )
+      {
+        double lambda         = std::abs( min_diag ) + reg;
+        Q.diagonal().array() += lambda;
+      }
+
+      Q_cache[t] = Q;
     }
 
     for( int i = 0; i < nx; ++i )
-      h_val[H_idx[kH++]] = Q( i, i );
+      h_val[H_idx[kH++]] = Q_cache[t]( i, i );
   }
 
   for( int t = 0; t < T; ++t )
   {
-    auto R = p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
-    if( !R.allFinite() )
-      std::cerr << "[Warning] Non-finite R at t=" << t << "\n";
+    const auto x = X.col( t );
+    const auto u = U.col( t );
+    bool       recompute = !use_cache || !cache_valid ||
+                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
+                           ( u - U_prev.col( t ) ).norm() > cache_eps;
 
-    double min_diag = R.diagonal().minCoeff();
-    if( min_diag + reg < 0.0 )
+    if( recompute )
     {
-      double lambda         = std::abs( min_diag ) + reg;
-      R.diagonal().array() += lambda;
+      auto R = p.cost_control_hessian( p.stage_cost, x, u, t );
+      if( !R.allFinite() )
+        std::cerr << "[Warning] Non-finite R at t=" << t << "\n";
+
+      double min_diag = R.diagonal().minCoeff();
+      if( min_diag + reg < 0.0 )
+      {
+        double lambda         = std::abs( min_diag ) + reg;
+        R.diagonal().array() += lambda;
+      }
+
+      R_cache[t] = R;
     }
 
     for( int i = 0; i < nu; ++i )
-      h_val[H_idx[kH++]] = R( i, i );
+      h_val[H_idx[kH++]] = R_cache[t]( i, i );
   }
 
   for( ; kH < H_idx.size(); ++kH )
     h_val[H_idx[kH]] = reg;
 
-  double*     a_val = qp.A.valuePtr();
-  std::size_t kA    = 0;
+  /* pre-compute dynamics Jacobians where needed ---------------- */
+  for( int t = 0; t <= T; ++t )
+  {
+    const auto x = X.col( t );
+    const auto u = U.col( std::min( t, T - 1 ) );
+    bool       recompute = !use_cache || !cache_valid ||
+                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
+                           ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
+
+    if( recompute )
+    {
+      Fx_cache[t] = p.dynamics_state_jacobian( p.dynamics, x, u );
+      Fu_cache[t] = p.dynamics_control_jacobian( p.dynamics, x, u );
+      f_cache[t]  = p.dynamics( x, u );
+    }
+  }
 
   for( int t = 0; t < T; ++t )
   {
-    const int  row0  = t * nx;
-    const auto x_t   = X.col( t );
-    const auto u_t   = U.col( t );
-    const auto x_tp1 = X.col( t + 1 );
-    const auto u_tp1 = ( t + 1 < T ) ? U.col( t + 1 ) : U.col( T - 1 );
+    const int row0 = t * nx;
 
-    if( !x_t.allFinite() || !u_t.allFinite() )
-      std::cerr << "[Warning] Non-finite dynamics at t=" << t << "\n";
+    const auto& Fx_t   = Fx_cache[t];
+    const auto& Fu_t   = Fu_cache[t];
+    const auto& Fx_tp1 = Fx_cache[t + 1];
+    const auto& Fu_tp1 = Fu_cache[t + 1];
+    const auto& f_t    = f_cache[t];
+    const auto& f_tp1  = f_cache[t + 1];
 
-    const auto Fx_t   = p.dynamics_state_jacobian( p.dynamics, x_t, u_t );
-    const auto Fu_t   = p.dynamics_control_jacobian( p.dynamics, x_t, u_t );
-    const auto Fx_tp1 = p.dynamics_state_jacobian( p.dynamics, x_tp1, u_tp1 );
-    const auto Fu_tp1 = p.dynamics_control_jacobian( p.dynamics, x_tp1, u_tp1 );
-
-    if( !Fx_t.allFinite() || !Fu_t.allFinite() || !Fx_tp1.allFinite() || !Fu_tp1.allFinite() )
-      std::cerr << "[Warning] Non-finite Jacobians at t=" << t << "\n";
-
-    const auto f_t   = p.dynamics( x_t, u_t );
-    const auto f_tp1 = p.dynamics( x_tp1, u_tp1 );
-
-    const auto defect         = x_tp1 - x_t - 0.5 * p.dt * ( f_t + f_tp1 );
+    const auto defect         = X.col( t + 1 ) - X.col( t ) - 0.5 * p.dt * ( f_t + f_tp1 );
     qp.lb.segment( row0, nx ) = -defect;
     qp.ub.segment( row0, nx ) = -defect;
 
@@ -310,6 +361,13 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
         for( int j = 0; j < nu; ++j )
           qp.A.coeffRef( row0 + i, id_control( t + 1, nx, nu, T ) + j ) = -0.5 * p.dt * Fu_tp1( i, j );
     }
+  }
+
+  if( use_cache )
+  {
+    X_prev      = X;
+    U_prev      = U;
+    cache_valid = true;
   }
 
   const int sb_off = n_dyn;
@@ -380,6 +438,8 @@ OSQPCollocation::solve( OCP& problem )
   X.col( 0 ) = problem.initial_state; // x₀ fixed
 
   constexpr double reg = 1e-6;
+
+  cache_valid = false; // invalidate caches for fresh solve
 
   /* --------------- outer SQP loop ------------------------------ */
   for( int it = 0; it < max_iter; ++it )

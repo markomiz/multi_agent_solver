@@ -37,6 +37,7 @@ public:
     max_ms         = params.at( "max_ms" );
     penalty_param  = 1.0;
     debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
+    momentum       = params.count( "momentum" ) ? params.at( "momentum" ) : 0.0;
   }
 
   /**
@@ -57,6 +58,15 @@ public:
     auto& state_trajectory = problem.best_states;
     auto& cost             = problem.best_cost;
 
+    if( velocity.rows() != controls.rows() || velocity.cols() != controls.cols() )
+    {
+      velocity.setZero( controls.rows(), controls.cols() );
+    }
+    else
+    {
+      velocity.setZero();
+    }
+
     state_trajectory = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
 
     cost = compute_augmented_cost( problem, eq_multipliers, ineq_multipliers, penalty_param, state_trajectory, controls );
@@ -71,13 +81,17 @@ public:
         break;
       }
 
-      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics,
+      const ControlTrajectory lookahead_controls = controls - momentum * velocity;
+
+      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, lookahead_controls, problem.dynamics,
                                                                      problem.objective_function, problem.dt );
 
-      const double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
+      const double step_size = armijo_line_search( problem.initial_state, lookahead_controls, gradients, problem.dynamics, problem.objective_function,
                                                    problem.dt, {} );
 
-      ControlTrajectory trial_controls = controls - step_size * gradients;
+      ControlTrajectory trial_controls = lookahead_controls - step_size * gradients;
+
+      ControlTrajectory new_velocity = momentum * velocity + step_size * gradients;
       if( problem.input_lower_bounds && problem.input_upper_bounds )
       {
         clamp_controls( trial_controls, problem.input_lower_bounds.value(), problem.input_upper_bounds.value() );
@@ -95,6 +109,7 @@ public:
         controls         = std::move( trial_controls );
         state_trajectory = std::move( trial_trajectory );
         cost             = trial_cost;
+        velocity         = std::move( new_velocity );
       }
 
       update_lagrange_multipliers( problem, state_trajectory, controls, eq_multipliers, ineq_multipliers, penalty_param );
@@ -143,6 +158,8 @@ private:
   ConstraintViolations eq_multipliers;
   ConstraintViolations ineq_multipliers;
   double               penalty_param;
+  ControlTrajectory    velocity;
+  double               momentum = 0.0;
 };
 
 } // namespace mas

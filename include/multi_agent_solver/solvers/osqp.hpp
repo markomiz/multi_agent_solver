@@ -131,7 +131,7 @@ public:
           throw std::runtime_error( "failed to update QP data" );
       }
 
-      solver->warmStart( solution, dual_solution );
+      solver->setWarmStart( solution, dual_solution );
 
       if( solver->solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
         throw std::runtime_error( "OSQP failed" );
@@ -331,9 +331,9 @@ private:
     if( !sparsity_initialized )
     {
       std::vector<Eigen::Triplet<double>> ht;
-      ht.reserve( qp_dim * qp_dim );
+      ht.reserve( qp_dim * ( qp_dim + 1 ) / 2 );
       for( int j = 0; j < qp_dim; ++j )
-        for( int i = 0; i < qp_dim; ++i )
+        for( int i = 0; i <= j; ++i )
           ht.emplace_back( i, j, H_dense( i, j ) );
       qp_data.H.setFromTriplets( ht.begin(), ht.end() );
       qp_data.H.makeCompressed();
@@ -350,8 +350,11 @@ private:
     }
     else
     {
-      Eigen::Map<Eigen::VectorXd>( qp_data.H.valuePtr(), qp_data.H.nonZeros() )
-        = Eigen::Map<const Eigen::VectorXd>( H_dense.data(), H_dense.size() );
+      double* Hv = qp_data.H.valuePtr();
+      int     idx = 0;
+      for( int j = 0; j < qp_dim; ++j )
+        for( int i = 0; i <= j; ++i )
+          Hv[idx++] = H_dense( i, j );
       Eigen::Map<Eigen::VectorXd>( qp_data.A.valuePtr(), qp_data.A.nonZeros() )
         = Eigen::Map<const Eigen::VectorXd>( A_dense.data(), A_dense.size() );
     }

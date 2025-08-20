@@ -52,6 +52,10 @@ public:
     solver->settings()->setMaxIteration( 1000 );
     solver->settings()->setScaling( 10 );
     solver->settings()->setPolish( true );
+    if( params.count( "rho" ) )
+      solver->settings()->setRho( params.at( "rho" ) );
+    if( params.count( "sigma" ) )
+      solver->settings()->setSigma( params.at( "sigma" ) );
   }
 
   //--------------------------------------------------------------------//
@@ -82,34 +86,7 @@ public:
     states = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
     cost   = problem.objective_function( states, controls );
 
-
-    double reg = 0.0;
-    assemble_qp_data( problem, states, controls, reg );
-
-
-    if( !solver_initialized )
-    {
-      solver->data()->setNumberOfVariables( qp_dim );
-      solver->data()->setNumberOfConstraints( qp_data.A.rows() );
-      if( !solver->data()->setHessianMatrix( qp_data.H ) || !solver->data()->setGradient( qp_data.gradient )
-          || !solver->data()->setLinearConstraintsMatrix( qp_data.A ) || !solver->data()->setLowerBound( qp_data.lb )
-          || !solver->data()->setUpperBound( qp_data.ub ) )
-        throw std::runtime_error( "failed to set initial QP data" );
-
-      if( !solver->initSolver() || !solver->isInitialized() )
-        throw std::runtime_error( "failed to initialise OSQP" );
-      solver_initialized = true;
-    }
-    else
-    {
-
-      if( !solver->updateHessianMatrix( qp_data.H ) || !solver->updateGradient( qp_data.gradient )
-          || !solver->updateLinearConstraintsMatrix( qp_data.A ) || !solver->updateLowerBound( qp_data.lb )
-          || !solver->updateUpperBound( qp_data.ub ) )
-        throw std::runtime_error( "failed to update QP data" );
-    }
-
-    //--------------------------------------------------------------------//
+    double reg = 1e-6;
 
     if( ls_parameters.empty() )
       ls_parameters = {
@@ -118,52 +95,52 @@ public:
         {                "c1", 1e-6 }
       };
 
-    //--------------------------------------------------------------------//
+    solution.setZero( qp_dim );
+    dual_solution.setZero( qp_data.A.rows() );
+
     for( int iter = 0; iter < max_iterations; ++iter )
     {
       const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
       if( elapsed_ms > max_ms )
       {
         if( debug )
-        {
           std::cerr << "OSQP-collocation finished in " << elapsed_ms << " ms,  cost = " << problem.best_cost << '\n';
-        }
         break;
       }
 
-      //---------------- adaptive Hessian regularisation -----------------
-      bool hess_ok = false;
-      for( int attempt = 0; attempt < 10; ++attempt )
+      assemble_qp_data( problem, states, controls, reg );
+
+      if( !solver_initialized )
       {
-        assemble_hessian( problem, states, controls, reg );
-        if( solver->updateHessianMatrix( qp_data.H ) )
-        {
-          hess_ok = true;
-          break;
-        }
-        reg = ( reg == 0.0 ? 1e-6 : reg * 10.0 );
+        solver->data()->setNumberOfVariables( qp_dim );
+        solver->data()->setNumberOfConstraints( qp_data.A.rows() );
+        if( !solver->data()->setHessianMatrix( qp_data.H ) || !solver->data()->setGradient( qp_data.gradient )
+            || !solver->data()->setLinearConstraintsMatrix( qp_data.A ) || !solver->data()->setLowerBound( qp_data.lb )
+            || !solver->data()->setUpperBound( qp_data.ub ) )
+          throw std::runtime_error( "failed to set initial QP data" );
+
+        if( !solver->initSolver() || !solver->isInitialized() )
+          throw std::runtime_error( "failed to initialise OSQP" );
+        solver_initialized = true;
       }
-      if( !hess_ok )
-        throw std::runtime_error( "Hessian update failed" );
+      else
+      {
+        if( !solver->updateHessianMatrix( qp_data.H ) || !solver->updateGradient( qp_data.gradient )
+            || !solver->updateLinearConstraintsMatrix( qp_data.A ) || !solver->updateLowerBound( qp_data.lb )
+            || !solver->updateUpperBound( qp_data.ub ) )
+          throw std::runtime_error( "failed to update QP data" );
+      }
 
-      //---------------- update remaining QP pieces ----------------------
-      assemble_gradient( problem, states, controls );
-      assemble_constraints( problem, states, controls );
-      assemble_bounds( problem );
+      solver->warmStart( solution, dual_solution );
 
-      if( !solver->updateGradient( qp_data.gradient ) || !solver->updateLinearConstraintsMatrix( qp_data.A )
-          || !solver->updateLowerBound( qp_data.lb ) || !solver->updateUpperBound( qp_data.ub ) )
-        throw std::runtime_error( "failed to push QP updates" );
-
-      //---------------- solve QP ---------------------------------------
       if( solver->solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
         throw std::runtime_error( "OSQP failed" );
 
-      solution = solver->getSolution();
-
+      solution       = solver->getSolution();
+      dual_solution  = solver->getDualSolution();
 
       for( int t = 0; t < Nc; ++t )
-        u_candidate.col( t ) = solution.segment( Ns * nx + t * nu, nu );
+        u_candidate.col( t ) = solution.segment( t * nu, nu );
 
       d_u = controls - u_candidate;
 
@@ -219,16 +196,19 @@ private:
   int n_state_bounds    = 0;
   int n_control_bounds  = 0;
 
-
   Eigen::VectorXd   solution;
+  Eigen::VectorXd   dual_solution;
   ControlTrajectory u_candidate;
   ControlTrajectory d_u;
   ControlTrajectory u_new;
   StateTrajectory   states_new;
 
+  Eigen::MatrixXd H_dense;
+  Eigen::MatrixXd A_dense;
+  bool            sparsity_initialized = false;
 
   std::map<std::string, double> ls_parameters;
-
+  
   //--------------------------------------------------------------------//
   void
   resize_buffers( const OCP& problem )
@@ -237,163 +217,144 @@ private:
     const int nx = problem.state_dim;
     const int nu = problem.control_dim;
 
-    qp_dim            = ( T + 1 ) * nx + T * nu;
-    n_dyn_constraints = T * nx;
+    qp_dim            = T * nu;
+    n_dyn_constraints = 0;
     n_state_bounds    = ( T + 1 ) * nx;
     n_control_bounds  = T * nu;
 
-
     solution.resize( qp_dim );
+    dual_solution.resize( n_state_bounds + n_control_bounds );
     u_candidate.resize( nu, T );
     d_u.resize( nu, T );
     u_new.resize( nu, T );
     states_new.resize( nx, T + 1 );
 
-
     qp_data.H.resize( qp_dim, qp_dim );
     qp_data.gradient.resize( qp_dim );
-    qp_data.A.resize( n_dyn_constraints + n_state_bounds + n_control_bounds, qp_dim );
-    qp_data.lb.resize( qp_data.A.rows() );
-    qp_data.ub.resize( qp_data.A.rows() );
+    qp_data.A.resize( n_state_bounds + n_control_bounds, qp_dim );
+    qp_data.lb.resize( n_state_bounds + n_control_bounds );
+    qp_data.ub.resize( n_state_bounds + n_control_bounds );
+
+    H_dense.resize( qp_dim, qp_dim );
+    A_dense.resize( n_state_bounds + n_control_bounds, qp_dim );
+
+    sparsity_initialized = false;
   }
 
   //--------------------------------------------------------------------//
   void
-  assemble_qp_data( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u, double reg )
+  assemble_qp_data( const OCP& p, const StateTrajectory& X, const ControlTrajectory& U, double reg )
   {
-    assemble_hessian( p, x, u, reg );
-    assemble_gradient( p, x, u );
-    assemble_constraints( p, x, u );
-    assemble_bounds( p );
-  }
-
-  //--------------------------------------------------------------------//
-  void
-  assemble_hessian( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u, double reg )
-  {
-
-
-    std::vector<Eigen::Triplet<double>> tri;
-    tri.reserve( qp_dim );
     const int nx = p.state_dim;
     const int nu = p.control_dim;
     const int T  = p.horizon_steps;
 
-
-    for( int t = 0; t <= T; ++t )
-    {
-      const Eigen::MatrixXd Q = p.cost_state_hessian( p.stage_cost, x.col( t ), u.col( std::min( t, T - 1 ) ), t );
-      for( int i = 0; i < nx; ++i )
-      {
-        const int idx = t * nx + i;
-        tri.emplace_back( idx, idx, std::max( Q( i, i ) + reg, 1e-6 ) );
-      }
-    }
-
+    std::vector<Eigen::MatrixXd> A( T ), B( T );
     for( int t = 0; t < T; ++t )
     {
-      const Eigen::MatrixXd R = p.cost_control_hessian( p.stage_cost, x.col( t ), u.col( t ), t );
-      for( int i = 0; i < nu; ++i )
-      {
-        const int idx = ( T + 1 ) * nx + t * nu + i;
-        tri.emplace_back( idx, idx, std::max( R( i, i ) + reg, 1e-6 ) );
-      }
+      A[t] = p.dynamics_state_jacobian( p.dynamics, X.col( t ), U.col( t ) );
+      B[t] = p.dynamics_control_jacobian( p.dynamics, X.col( t ), U.col( t ) );
     }
-    qp_data.H.setFromTriplets( tri.begin(), tri.end() );
-  }
 
-  //--------------------------------------------------------------------//
-  void
-  assemble_gradient( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u )
-  {
-    const int nx = p.state_dim;
-    const int nu = p.control_dim;
-    const int T  = p.horizon_steps;
+    std::vector<std::vector<Eigen::MatrixXd>> G( T + 1 );
+    G[0] = {};
+    for( int t = 0; t < T; ++t )
+    {
+      G[t + 1].resize( t + 1 );
+      for( int k = 0; k < t; ++k )
+        G[t + 1][k] = A[t] * G[t][k];
+      G[t + 1][t] = B[t];
+    }
 
+    std::vector<State> S( T + 1 );
+    for( int t = 0; t <= T; ++t )
+    {
+      State s = X.col( t );
+      for( int k = 0; k < t; ++k )
+        s -= G[t][k] * U.col( k );
+      S[t] = s;
+    }
+
+    H_dense.setZero();
     qp_data.gradient.setZero();
-    for( int t = 0; t <= T; ++t )
-      qp_data.gradient.segment( t * nx, nx ) = p.cost_state_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
-
-    for( int t = 0; t < T; ++t )
-      qp_data.gradient.segment( ( T + 1 ) * nx + t * nu, nu ) = p.cost_control_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
-  }
-
-  //--------------------------------------------------------------------//
-  void
-  assemble_constraints( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u )
-  {
-    const int nx = p.state_dim;
-    const int nu = p.control_dim;
-    const int T  = p.horizon_steps;
-
-    std::vector<Eigen::Triplet<double>> tri;
-    tri.reserve( ( n_dyn_constraints + n_state_bounds + n_control_bounds ) * ( nx + nu ) );
-
-
-    for( int t = 0; t < T; ++t )
-    {
-      const int row_off = t * nx;
-
-      for( int i = 0; i < nx; ++i )
-        tri.emplace_back( row_off + i, ( t + 1 ) * nx + i, 1.0 );
-
-      const Eigen::MatrixXd A_t = p.dynamics_state_jacobian( p.dynamics, x.col( t ), u.col( t ) );
-      const Eigen::MatrixXd B_t = p.dynamics_control_jacobian( p.dynamics, x.col( t ), u.col( t ) );
-
-      for( int i = 0; i < nx; ++i )
-        for( int j = 0; j < nx; ++j )
-          tri.emplace_back( row_off + i, t * nx + j, -A_t( i, j ) );
-
-      for( int i = 0; i < nx; ++i )
-        for( int j = 0; j < nu; ++j )
-          tri.emplace_back( row_off + i, ( T + 1 ) * nx + t * nu + j, -B_t( i, j ) );
-    }
-
-
-    const int sb_off = n_dyn_constraints;
-    for( int t = 0; t <= T; ++t )
-      for( int i = 0; i < nx; ++i )
-        tri.emplace_back( sb_off + t * nx + i, t * nx + i, 1.0 );
-
-
-    const int cb_off = n_dyn_constraints + n_state_bounds;
-    for( int t = 0; t < T; ++t )
-      for( int i = 0; i < nu; ++i )
-        tri.emplace_back( cb_off + t * nu + i, ( T + 1 ) * nx + t * nu + i, 1.0 );
-
-    qp_data.A.setFromTriplets( tri.begin(), tri.end() );
-  }
-
-  //--------------------------------------------------------------------//
-  void
-  assemble_bounds( const OCP& p )
-  {
-    const int nx = p.state_dim;
-    const int nu = p.control_dim;
-    const int T  = p.horizon_steps;
-
+    A_dense.setZero();
     qp_data.lb.setZero();
     qp_data.ub.setZero();
 
-
-    const int sb_off = n_dyn_constraints;
-    for( int t = 0; t <= T; ++t )
-      for( int i = 0; i < nx; ++i )
-      {
-        const int idx     = sb_off + t * nx + i;
-        qp_data.lb( idx ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) : OsqpEigen::INFTY;
-      }
-
-
-    const int cb_off = n_dyn_constraints + n_state_bounds;
     for( int t = 0; t < T; ++t )
-      for( int i = 0; i < nu; ++i )
+    {
+      const Eigen::VectorXd gx = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
+      const Eigen::MatrixXd Q  = p.cost_state_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
+      for( int i = 0; i < t; ++i )
       {
-        const int idx     = cb_off + t * nu + i;
-        qp_data.lb( idx ) = p.input_lower_bounds ? ( *p.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( idx ) = p.input_upper_bounds ? ( *p.input_upper_bounds )( i ) : OsqpEigen::INFTY;
+        const Eigen::MatrixXd Gi = G[t][i];
+        qp_data.gradient.segment( i * nu, nu ) += Gi.transpose() * gx;
+        for( int j = 0; j < t; ++j )
+          H_dense.block( i * nu, j * nu, nu, nu ) += Gi.transpose() * Q * G[t][j];
       }
+      qp_data.gradient.segment( t * nu, nu )
+        += p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
+      H_dense.block( t * nu, t * nu, nu, nu )
+        += p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
+    }
+
+    const Eigen::VectorXd gxT = p.cost_state_gradient( p.stage_cost, X.col( T ), U.col( T - 1 ), T );
+    const Eigen::MatrixXd QT  = p.cost_state_hessian( p.stage_cost, X.col( T ), U.col( T - 1 ), T );
+    for( int i = 0; i < T; ++i )
+    {
+      const Eigen::MatrixXd Gi = G[T][i];
+      qp_data.gradient.segment( i * nu, nu ) += Gi.transpose() * gxT;
+      for( int j = 0; j < T; ++j )
+        H_dense.block( i * nu, j * nu, nu, nu ) += Gi.transpose() * QT * G[T][j];
+    }
+
+    H_dense.diagonal().array() += reg;
+
+    int row = 0;
+    for( int t = 0; t <= T; ++t )
+      for( int i = 0; i < nx; ++i, ++row )
+      {
+        for( int k = 0; k < t; ++k )
+          A_dense.block( row, k * nu, 1, nu ) = G[t][k].row( i );
+        qp_data.lb( row ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) - S[t]( i ) : -OsqpEigen::INFTY;
+        qp_data.ub( row ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) - S[t]( i ) : OsqpEigen::INFTY;
+      }
+
+    for( int t = 0; t < T; ++t )
+      for( int i = 0; i < nu; ++i, ++row )
+      {
+        A_dense( row, t * nu + i ) = 1.0;
+        qp_data.lb( row ) = p.input_lower_bounds ? ( *p.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
+        qp_data.ub( row ) = p.input_upper_bounds ? ( *p.input_upper_bounds )( i ) : OsqpEigen::INFTY;
+      }
+
+    if( !sparsity_initialized )
+    {
+      std::vector<Eigen::Triplet<double>> ht;
+      ht.reserve( qp_dim * qp_dim );
+      for( int j = 0; j < qp_dim; ++j )
+        for( int i = 0; i < qp_dim; ++i )
+          ht.emplace_back( i, j, H_dense( i, j ) );
+      qp_data.H.setFromTriplets( ht.begin(), ht.end() );
+      qp_data.H.makeCompressed();
+
+      std::vector<Eigen::Triplet<double>> at;
+      at.reserve( A_dense.rows() * A_dense.cols() );
+      for( int j = 0; j < qp_dim; ++j )
+        for( int i = 0; i < A_dense.rows(); ++i )
+          at.emplace_back( i, j, A_dense( i, j ) );
+      qp_data.A.setFromTriplets( at.begin(), at.end() );
+      qp_data.A.makeCompressed();
+
+      sparsity_initialized = true;
+    }
+    else
+    {
+      Eigen::Map<Eigen::VectorXd>( qp_data.H.valuePtr(), qp_data.H.nonZeros() )
+        = Eigen::Map<const Eigen::VectorXd>( H_dense.data(), H_dense.size() );
+      Eigen::Map<Eigen::VectorXd>( qp_data.A.valuePtr(), qp_data.A.nonZeros() )
+        = Eigen::Map<const Eigen::VectorXd>( A_dense.data(), A_dense.size() );
+    }
   }
 
   //--------------------------------------------------------------------//
@@ -401,7 +362,7 @@ private:
   int    max_iterations;
   double tolerance;
   double max_ms;
-  bool   debug;
+  bool   debug = false;
 };
 
 } // namespace mas

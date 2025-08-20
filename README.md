@@ -2,9 +2,10 @@
 
 MultiAgentSolver is a high-performance C++ library designed to solve multi-agent optimization problems. The library includes solvers such as:
 
-* **CGD (Constrained Gradient Descent)** 
-* **iLQR (Iterative Linear Quadratic Regulator)** 
-* **OSQP Solver** utilizing the osqp library
+* **CGD (Constrained Gradient Descent)**
+* **iLQR (Iterative Linear Quadratic Regulator)**
+* **OSQP Solver** utilizing the osqp library, now with warm-starting and partial
+  condensing support along with configurable `rho` and `sigma`
 
 Additionally, it supports multi-agent coordination through Nash Equilibrium-based optimization and for comparison combining multiple agents into one big optimization problem.
 

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <Eigen/Dense>
+#include <Eigen/Eigenvalues>
 #include <Eigen/Sparse>
 
 #include "multi_agent_solver/integrator.hpp"
@@ -136,8 +137,8 @@ public:
       if( solver->solveProblem() != OsqpEigen::ErrorExitFlag::NoError )
         throw std::runtime_error( "OSQP failed" );
 
-      solution       = solver->getSolution();
-      dual_solution  = solver->getDualSolution();
+      solution      = solver->getSolution();
+      dual_solution = solver->getDualSolution();
 
       for( int t = 0; t < Nc; ++t )
         u_candidate.col( t ) = solution.segment( t * nu, nu );
@@ -208,7 +209,7 @@ private:
   bool            sparsity_initialized = false;
 
   std::map<std::string, double> ls_parameters;
-  
+
   //--------------------------------------------------------------------//
   void
   resize_buffers( const OCP& problem )
@@ -287,22 +288,20 @@ private:
       const Eigen::MatrixXd Q  = p.cost_state_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
       for( int i = 0; i < t; ++i )
       {
-        const Eigen::MatrixXd Gi = G[t][i];
+        const Eigen::MatrixXd Gi                = G[t][i];
         qp_data.gradient.segment( i * nu, nu ) += Gi.transpose() * gx;
         for( int j = 0; j < t; ++j )
           H_dense.block( i * nu, j * nu, nu, nu ) += Gi.transpose() * Q * G[t][j];
       }
-      qp_data.gradient.segment( t * nu, nu )
-        += p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
-      H_dense.block( t * nu, t * nu, nu, nu )
-        += p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
+      qp_data.gradient.segment( t * nu, nu )  += p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
+      H_dense.block( t * nu, t * nu, nu, nu ) += p.cost_control_hessian( p.stage_cost, X.col( t ), U.col( t ), t );
     }
 
     const Eigen::VectorXd gxT = p.cost_state_gradient( p.stage_cost, X.col( T ), U.col( T - 1 ), T );
     const Eigen::MatrixXd QT  = p.cost_state_hessian( p.stage_cost, X.col( T ), U.col( T - 1 ), T );
     for( int i = 0; i < T; ++i )
     {
-      const Eigen::MatrixXd Gi = G[T][i];
+      const Eigen::MatrixXd Gi                = G[T][i];
       qp_data.gradient.segment( i * nu, nu ) += Gi.transpose() * gxT;
       for( int j = 0; j < T; ++j )
         H_dense.block( i * nu, j * nu, nu, nu ) += Gi.transpose() * QT * G[T][j];
@@ -310,22 +309,36 @@ private:
 
     H_dense.diagonal().array() += reg;
 
+    // Force symmetry and positive semi-definiteness to keep the KKT matrix
+    // quasi-definite even when numerical round-off would introduce small
+    // asymmetric components or negative eigenvalues.
+    H_dense = 0.5 * ( H_dense + H_dense.transpose() );
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es( H_dense );
+    Eigen::VectorXd                                evals = es.eigenvalues().cwiseMax( reg );
+    H_dense                                              = es.eigenvectors() * evals.asDiagonal() * es.eigenvectors().transpose();
+
     int row = 0;
     for( int t = 0; t <= T; ++t )
       for( int i = 0; i < nx; ++i, ++row )
       {
         for( int k = 0; k < t; ++k )
           A_dense.block( row, k * nu, 1, nu ) = G[t][k].row( i );
-        qp_data.lb( row ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) - S[t]( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( row ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) - S[t]( i ) : OsqpEigen::INFTY;
+        double lb_val = 0.0;
+        double ub_val = 0.0;
+        if( p.state_lower_bounds )
+          lb_val = ( *p.state_lower_bounds )(i) -S[t]( i );
+        if( p.state_upper_bounds )
+          ub_val = ( *p.state_upper_bounds )(i) -S[t]( i );
+        qp_data.lb( row ) = p.state_lower_bounds ? lb_val : -OsqpEigen::INFTY;
+        qp_data.ub( row ) = p.state_upper_bounds ? ub_val : OsqpEigen::INFTY;
       }
 
     for( int t = 0; t < T; ++t )
       for( int i = 0; i < nu; ++i, ++row )
       {
         A_dense( row, t * nu + i ) = 1.0;
-        qp_data.lb( row ) = p.input_lower_bounds ? ( *p.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( row ) = p.input_upper_bounds ? ( *p.input_upper_bounds )( i ) : OsqpEigen::INFTY;
+        qp_data.lb( row )          = p.input_lower_bounds ? ( *p.input_lower_bounds )( i ) : -OsqpEigen::INFTY;
+        qp_data.ub( row )          = p.input_upper_bounds ? ( *p.input_upper_bounds )( i ) : OsqpEigen::INFTY;
       }
 
     if( !sparsity_initialized )
@@ -350,13 +363,13 @@ private:
     }
     else
     {
-      double* Hv = qp_data.H.valuePtr();
+      double* Hv  = qp_data.H.valuePtr();
       int     idx = 0;
       for( int j = 0; j < qp_dim; ++j )
         for( int i = 0; i <= j; ++i )
           Hv[idx++] = H_dense( i, j );
-      Eigen::Map<Eigen::VectorXd>( qp_data.A.valuePtr(), qp_data.A.nonZeros() )
-        = Eigen::Map<const Eigen::VectorXd>( A_dense.data(), A_dense.size() );
+      Eigen::Map<Eigen::VectorXd>( qp_data.A.valuePtr(), qp_data.A.nonZeros() ) = Eigen::Map<const Eigen::VectorXd>( A_dense.data(),
+                                                                                                                     A_dense.size() );
     }
   }
 

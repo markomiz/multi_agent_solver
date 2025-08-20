@@ -134,8 +134,6 @@ main( int /*argc*/, char** /*argv*/ )
   std::map<std::string, Solver> solvers;
   solvers.emplace( "iLQR", iLQR() );
   solvers.emplace( "CGD", CGD() );
-  solvers.emplace( "OSQP", OSQP() );
-  solvers.emplace( "OSQP_collocation", OSQPCollocation() );
 
   struct SolverResult
   {

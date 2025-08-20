@@ -79,8 +79,8 @@ create_single_track_lane_following_ocp()
   };
 
   // Hessian with respect to state.
-  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t time_idx ) -> Eigen::MatrixXd {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 6, 6 );
+  problem.cost_state_hessian = [=]( const StageCostFunction&, const State& state, const Control&, size_t ) -> Eigen::MatrixXd {
+    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( state.size(), state.size() );
     H( 1, 1 )         = 2.0 * w_lane;
     H( 3, 3 )         = 2.0 * w_speed;
     return H;

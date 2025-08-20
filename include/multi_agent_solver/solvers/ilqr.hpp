@@ -118,9 +118,16 @@ public:
         k_matrix[t] = -q_uu_inv_step[t] * q_ux_step[t];
 
         // Value function update ------------------------------------------
-        v_x  = q_x_step[t] + k_matrix[t].transpose() * ( q_uu_step[t] * k[t] + q_u_step[t] );
-        v_xx = q_xx_step[t] + k_matrix[t].transpose() * ( q_uu_step[t] * k_matrix[t] + q_ux_step[t] );
-        v_xx = 0.5 * ( v_xx + v_xx.transpose() ); // symmetrise
+        // V_x = Q_x + K^T Q_u + Q_{ux}^T k + K^T Q_{uu} k
+        v_x = q_x_step[t] + k_matrix[t].transpose() * q_u_step[t] + q_ux_step[t].transpose() * k[t]
+            + k_matrix[t].transpose() * q_uu_step[t] * k[t];
+
+        // V_xx = Q_xx + K^T Q_{ux} + Q_{ux}^T K + K^T Q_{uu} K
+        v_xx = q_xx_step[t] + k_matrix[t].transpose() * q_ux_step[t] + q_ux_step[t].transpose() * k_matrix[t]
+             + k_matrix[t].transpose() * q_uu_step[t] * k_matrix[t];
+
+        // Ensure symmetry of V_xx numerically
+        v_xx = 0.5 * ( v_xx + v_xx.transpose() );
       }
 
       //---------------------- forward pass ------------------------------//

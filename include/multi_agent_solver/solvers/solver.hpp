@@ -6,19 +6,20 @@
 #include "multi_agent_solver/solvers/cgd.hpp"
 #include "multi_agent_solver/solvers/ilqr.hpp"
 #ifdef MAS_HAVE_OSQP
-#  include "multi_agent_solver/solvers/osqp.hpp"
-#  include "multi_agent_solver/solvers/osqp_collocation.hpp"
+  #include "multi_agent_solver/solvers/osqp.hpp"
+  #include "multi_agent_solver/solvers/osqp_collocation.hpp"
 #endif
 
 namespace mas
 {
 
 // Holds any of the concrete solver objects.
-using Solver = std::variant<iLQR, CGD
-#ifdef MAS_HAVE_OSQP
-                             , OSQP, OSQPCollocation
+#ifndef MAS_HAVE_OSQP
+using Solver = std::variant<iLQR, CGD>;
 #endif
-                             >;
+#ifdef MAS_HAVE_OSQP
+using Solver = std::variant<iLQR, CGD, OSQP, OSQPCollocation>;
+#endif
 
 /**
  * @brief Convenience visitor to call solve() on the variant without

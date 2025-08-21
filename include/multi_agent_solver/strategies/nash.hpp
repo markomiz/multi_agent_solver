@@ -13,7 +13,11 @@ namespace mas {
 namespace detail {
 
 inline Solver make_solver_like(const Solver& proto) {
-  return std::visit([](const auto& s) -> Solver { return std::decay_t<decltype(s)>{}; }, proto);
+  return std::visit(
+      [](const auto& s) -> Solver {
+        return std::decay_t<decltype(s)>{};
+      },
+      proto);
 }
 
 inline Solution collect_solution(MultiAgentProblem& problem) {
@@ -42,12 +46,17 @@ inline void sequential_solve(std::vector<Solver>& solvers, MultiAgentProblem& pr
   }
 }
 
-inline Solution run_sequential(int max_outer, const Solver& solver_proto, MultiAgentProblem& problem) {
+inline Solution run_sequential(int max_outer,
+                               const Solver& solver_proto,
+                               const SolverParams& params,
+                               MultiAgentProblem& problem) {
   problem.compute_offsets();
   std::vector<Solver> solvers;
   solvers.reserve(problem.blocks.size());
-  for (std::size_t i = 0; i < problem.blocks.size(); ++i)
+  for (std::size_t i = 0; i < problem.blocks.size(); ++i) {
     solvers.emplace_back(make_solver_like(solver_proto));
+    set_params(solvers.back(), params);
+  }
 
   for (int outer = 0; outer < max_outer; ++outer)
     sequential_solve(solvers, problem);
@@ -55,12 +64,17 @@ inline Solution run_sequential(int max_outer, const Solver& solver_proto, MultiA
   return collect_solution(problem);
 }
 
-inline Solution run_line_search(int max_outer, const Solver& solver_proto, MultiAgentProblem& problem) {
+inline Solution run_line_search(int max_outer,
+                               const Solver& solver_proto,
+                               const SolverParams& params,
+                               MultiAgentProblem& problem) {
   problem.compute_offsets();
   std::vector<Solver> solvers;
   solvers.reserve(problem.blocks.size());
-  for (std::size_t i = 0; i < problem.blocks.size(); ++i)
+  for (std::size_t i = 0; i < problem.blocks.size(); ++i) {
     solvers.emplace_back(make_solver_like(solver_proto));
+    set_params(solvers.back(), params);
+  }
 
   double base_cost = total_cost(problem);
   for (int outer = 0; outer < max_outer; ++outer) {
@@ -123,12 +137,17 @@ inline Solution run_line_search(int max_outer, const Solver& solver_proto, Multi
   return collect_solution(problem);
 }
 
-inline Solution run_trust_region(int max_outer, const Solver& solver_proto, MultiAgentProblem& problem) {
+inline Solution run_trust_region(int max_outer,
+                                 const Solver& solver_proto,
+                                 const SolverParams& params,
+                                 MultiAgentProblem& problem) {
   problem.compute_offsets();
   std::vector<Solver> solvers;
   solvers.reserve(problem.blocks.size());
-  for (std::size_t i = 0; i < problem.blocks.size(); ++i)
+  for (std::size_t i = 0; i < problem.blocks.size(); ++i) {
     solvers.emplace_back(make_solver_like(solver_proto));
+    set_params(solvers.back(), params);
+  }
 
   std::vector<double> radii(problem.blocks.size(), 1.0);
 
@@ -178,36 +197,48 @@ inline Solution run_trust_region(int max_outer, const Solver& solver_proto, Mult
 } // namespace detail
 
 struct SequentialNashStrategy {
-  int    max_outer;
-  Solver solver_proto;
+  int          max_outer;
+  Solver       solver_proto;
+  SolverParams params;
 
-  SequentialNashStrategy(int outer, Solver s)
+  SequentialNashStrategy(int outer, Solver s, SolverParams p)
       : max_outer(outer)
-      , solver_proto(std::move(s)) {}
+      , solver_proto(std::move(s))
+      , params(std::move(p)) {}
 
-  Solution operator()(MultiAgentProblem& problem) { return detail::run_sequential(max_outer, solver_proto, problem); }
+  Solution operator()(MultiAgentProblem& problem) {
+    return detail::run_sequential(max_outer, solver_proto, params, problem);
+  }
 };
 
 struct LineSearchNashStrategy {
-  int    max_outer;
-  Solver solver_proto;
+  int          max_outer;
+  Solver       solver_proto;
+  SolverParams params;
 
-  LineSearchNashStrategy(int outer, Solver s)
+  LineSearchNashStrategy(int outer, Solver s, SolverParams p)
       : max_outer(outer)
-      , solver_proto(std::move(s)) {}
+      , solver_proto(std::move(s))
+      , params(std::move(p)) {}
 
-  Solution operator()(MultiAgentProblem& problem) { return detail::run_line_search(max_outer, solver_proto, problem); }
+  Solution operator()(MultiAgentProblem& problem) {
+    return detail::run_line_search(max_outer, solver_proto, params, problem);
+  }
 };
 
 struct TrustRegionNashStrategy {
-  int    max_outer;
-  Solver solver_proto;
+  int          max_outer;
+  Solver       solver_proto;
+  SolverParams params;
 
-  TrustRegionNashStrategy(int outer, Solver s)
+  TrustRegionNashStrategy(int outer, Solver s, SolverParams p)
       : max_outer(outer)
-      , solver_proto(std::move(s)) {}
+      , solver_proto(std::move(s))
+      , params(std::move(p)) {}
 
-  Solution operator()(MultiAgentProblem& problem) { return detail::run_trust_region(max_outer, solver_proto, problem); }
+  Solution operator()(MultiAgentProblem& problem) {
+    return detail::run_trust_region(max_outer, solver_proto, params, problem);
+  }
 };
 
 } // namespace mas

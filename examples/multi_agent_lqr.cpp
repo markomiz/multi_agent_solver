@@ -4,6 +4,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
+#include <string>
 
 #include "Eigen/Dense"
 
@@ -41,9 +42,10 @@ mas::OCP create_linear_lqr_ocp(int n_x, int n_u, double dt, int T) {
 struct Result { std::string name; double cost; double time_ms; };
 
 /*────────────────────────────  main  ──────────────────────────────*/
-int main() {
+int main(int argc, char** argv) {
   using namespace mas;
-  constexpr int N = 10;  constexpr int n_x=4, n_u=4, T=10;  constexpr double dt=0.1;
+  const int N = (argc > 1) ? std::stoi(argv[1]) : 10;
+  constexpr int n_x=4, n_u=4, T=10;  constexpr double dt=0.1;
 
   MultiAgentProblem problem;
   for (int i=0;i<N;++i) {
@@ -93,54 +95,46 @@ int main() {
 
   time_solver("Nash Sequential iLQR", [&](){
     Solver solver{std::in_place_type<iLQR>};
-    set_params(solver, p);
-    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
   time_solver("Nash Sequential CGD", [&](){
     Solver solver{std::in_place_type<CGD>};
-    set_params(solver, p);
-    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
 #ifdef MAS_HAVE_OSQP
   time_solver("Nash Sequential OSQP", [&](){
     Solver solver{std::in_place_type<OSQP>};
-    set_params(solver, p);
-    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
   time_solver("Nash Sequential OSQP-collocation", [&](){
     Solver solver{std::in_place_type<OSQPCollocation>};
-    set_params(solver, p);
-    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = SequentialNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
 #endif
 
   time_solver("Nash LineSearch iLQR", [&](){
     Solver solver{std::in_place_type<iLQR>};
-    set_params(solver, p);
-    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
   time_solver("Nash LineSearch CGD", [&](){
     Solver solver{std::in_place_type<CGD>};
-    set_params(solver, p);
-    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
 #ifdef MAS_HAVE_OSQP
   time_solver("Nash LineSearch OSQP", [&](){
     Solver solver{std::in_place_type<OSQP>};
-    set_params(solver, p);
-    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
   time_solver("Nash LineSearch OSQP-collocation", [&](){
     Solver solver{std::in_place_type<OSQPCollocation>};
-    set_params(solver, p);
-    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver)};
+    Strategy strat = LineSearchNashStrategy{max_outer, std::move(solver), p};
     return mas::solve(strat, problem);
   });
 #endif

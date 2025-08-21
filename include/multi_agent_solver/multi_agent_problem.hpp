@@ -57,6 +57,21 @@ public:
       g.initial_state.segment(b.state_offset, b.state_dim) = b.agent->ocp->initial_state;
     }
 
+    bool all_bounds = true;
+    for (auto& b : blocks) {
+      auto& ocp = *b.agent->ocp;
+      all_bounds &= ocp.input_lower_bounds.has_value() && ocp.input_upper_bounds.has_value();
+    }
+    if (all_bounds) {
+      g.input_lower_bounds = Eigen::VectorXd(total_u);
+      g.input_upper_bounds = Eigen::VectorXd(total_u);
+      for (auto& b : blocks) {
+        auto& ocp = *b.agent->ocp;
+        g.input_lower_bounds->segment(b.control_offset, b.control_dim) = *ocp.input_lower_bounds;
+        g.input_upper_bounds->segment(b.control_offset, b.control_dim) = *ocp.input_upper_bounds;
+      }
+    }
+
     g.dynamics = [bs=blocks](const State& X, const Control& U){
       StateDerivative out = StateDerivative::Zero(X.size());
       for (auto& b : bs) {

@@ -5,7 +5,6 @@
 #include <string>
 
 #include "multi_agent_solver/models/single_track_model.hpp"
-#include "multi_agent_solver/multi_agent_aggregator.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
@@ -134,8 +133,10 @@ main( int /*argc*/, char** /*argv*/ )
   std::map<std::string, Solver> solvers;
   solvers.emplace( "iLQR", iLQR() );
   solvers.emplace( "CGD", CGD() );
+#ifdef MAS_HAVE_OSQP
   solvers.emplace( "OSQP", OSQP() );
-  solvers.emplace( "OSQP_collocation", OSQPCollocation() );
+  solvers.emplace( "OSQP Collocation", OSQPCollocation() );
+#endif
 
   struct SolverResult
   {
@@ -148,19 +149,18 @@ main( int /*argc*/, char** /*argv*/ )
   /*---------------------  run each solver  ------------------------*/
   for( auto& [name, solver] : solvers )
   {
-    auto start = std::chrono::high_resolution_clock::now();
-    mas::set_params( solver, params ); // variant-safe call
-    mas::solve( solver, problem );     // variant-safe call
+    auto problem_copy = problem; // Copy the problem for each solver to avoid state pollution
+    auto start        = std::chrono::high_resolution_clock::now();
+    mas::set_params( solver, params );  // variant-safe call
+    mas::solve( solver, problem_copy ); // variant-safe call
     // print best states and controls
     std::cout << "Solver: " << name << "\n";
-    std::cout << "Best states:\n" << problem.best_states << "\n";
-    std::cout << "Best controls:\n" << problem.best_controls << "\n";
+    std::cout << "Best states:\n" << problem_copy.best_states << "\n";
+    std::cout << "Best controls:\n" << problem_copy.best_controls << "\n";
 
     auto end = std::chrono::high_resolution_clock::now();
 
-    results[name] = { problem.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
-
-    problem.reset(); // ready for next solver
+    results[name] = { problem_copy.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
   }
 
   /*---------------------  pretty print  ---------------------------*/

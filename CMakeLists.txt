@@ -10,8 +10,9 @@ option(BUILD_SHARED_LIBS "Build as shared library" OFF)
 # Dependencies
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
 find_package(OpenMP REQUIRED)
-find_package(osqp REQUIRED)
-find_package(OsqpEigen REQUIRED)
+# Optional OSQP dependencies
+find_package(osqp QUIET)
+find_package(OsqpEigen QUIET)
 
 # Interface library
 add_library(MultiAgentSolver INTERFACE)
@@ -23,10 +24,12 @@ target_include_directories(MultiAgentSolver INTERFACE
 
 target_link_libraries(MultiAgentSolver INTERFACE
   Eigen3::Eigen
-  OsqpEigen::OsqpEigen
-  osqp::osqp
   OpenMP::OpenMP_CXX
 )
+if(osqp_FOUND AND OsqpEigen_FOUND)
+  target_link_libraries(MultiAgentSolver INTERFACE OsqpEigen::OsqpEigen osqp::osqp)
+  target_compile_definitions(MultiAgentSolver INTERFACE MAS_HAVE_OSQP)
+endif()
 
 # Optional examples
 if(BUILD_EXAMPLES)

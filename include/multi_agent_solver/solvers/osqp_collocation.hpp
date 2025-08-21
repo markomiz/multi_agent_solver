@@ -256,11 +256,10 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 
   for( int t = 1; t <= T; ++t )
   {
-    const auto x = X.col( t );
-    const auto u = U.col( std::min( t, T - 1 ) );
-    bool       recompute = !use_cache || !cache_valid ||
-                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
-                           ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
+    const auto x         = X.col( t );
+    const auto u         = U.col( std::min( t, T - 1 ) );
+    bool       recompute = !use_cache || !cache_valid || ( x - X_prev.col( t ) ).norm() > cache_eps
+                  || ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
 
     if( recompute )
     {
@@ -284,11 +283,9 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 
   for( int t = 0; t < T; ++t )
   {
-    const auto x = X.col( t );
-    const auto u = U.col( t );
-    bool       recompute = !use_cache || !cache_valid ||
-                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
-                           ( u - U_prev.col( t ) ).norm() > cache_eps;
+    const auto x   = X.col( t );
+    const auto u   = U.col( t );
+    bool recompute = !use_cache || !cache_valid || ( x - X_prev.col( t ) ).norm() > cache_eps || ( u - U_prev.col( t ) ).norm() > cache_eps;
 
     if( recompute )
     {
@@ -316,11 +313,10 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
   /* pre-compute dynamics Jacobians where needed ---------------- */
   for( int t = 0; t <= T; ++t )
   {
-    const auto x = X.col( t );
-    const auto u = U.col( std::min( t, T - 1 ) );
-    bool       recompute = !use_cache || !cache_valid ||
-                           ( x - X_prev.col( t ) ).norm() > cache_eps ||
-                           ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
+    const auto x         = X.col( t );
+    const auto u         = U.col( std::min( t, T - 1 ) );
+    bool       recompute = !use_cache || !cache_valid || ( x - X_prev.col( t ) ).norm() > cache_eps
+                  || ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
 
     if( recompute )
     {

@@ -37,14 +37,8 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
   double beta              = get_parameter( parameters, "beta", 0.5 );
   double c1                = get_parameter( parameters, "c1", 1e-6 );
 
-  double alpha    = initial_step_size;
-  double cost_ref = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
-
-  // The search direction is the negative gradient, so grad^T * (-grad)
-  // should be negative. The Armijo condition expects f(x + alpha p)
-  // <= f(x) + c1 * alpha * grad^T p. With p = -gradients this becomes
-  // cost_ref + c1 * alpha * directional_derivative where
-  // directional_derivative = grad^T * (-grad).
+  double alpha                  = initial_step_size;
+  double cost_ref               = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
   double directional_derivative = gradients.cwiseProduct( -gradients ).sum();
 
   while( true )
@@ -123,4 +117,4 @@ constant_line_search( const State& /*initial_state*/, const ControlTrajectory& /
 
   return get_parameter( parameters, "step_size", 0.1 );
 }
-}
+} // namespace mas

@@ -126,7 +126,7 @@ public:
       {
         if( debug )
         {
-          std::cerr << "OSQP-collocation finished in " << elapsed_ms << " ms,  cost = " << problem.best_cost << '\n';
+          std::cout << "OSQP-collocation finished in " << elapsed_ms << " ms,  cost = " << problem.best_cost << '\n';
         }
         break;
       }
@@ -180,7 +180,7 @@ public:
         states   = states_new;
         cost     = cost_new;
         if( debug )
-          std::cerr << "OSQP converged in " << iter + 1 << " SQP steps\n";
+          std::cout << "OSQP converged in " << iter + 1 << " SQP steps\n";
         break;
       }
       if( cost_new < cost )
@@ -192,7 +192,7 @@ public:
       else
       {
         if( debug )
-          std::cerr << "OSQP converged in " << iter + 1 << " SQP steps\n";
+          std::cout << "OSQP converged in " << iter + 1 << " SQP steps\n";
         break;
       }
     }

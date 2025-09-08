@@ -57,9 +57,7 @@ create_single_track_lane_following_ocp()
   };
 
   // Terminal cost (set to zero here, can be modified if needed).
-  problem.terminal_cost = [=]( const State& state ) -> double { return 0.0; };
-  // --- Add analytic derivatives for the cost function. ---
-  // Gradient with respect to state.
+  problem.terminal_cost       = [=]( const State& state ) -> double { return 0.0; };
   problem.cost_state_gradient = [=]( const StageCostFunction&, const State& state, const Control&, size_t time_idx ) -> Eigen::VectorXd {
     Eigen::VectorXd grad = Eigen::VectorXd::Zero( state.size() );
     // Only Y (index 1) and vx (index 3) appear in the cost.
@@ -151,15 +149,9 @@ main( int /*argc*/, char** /*argv*/ )
   {
     auto problem_copy = problem; // Copy the problem for each solver to avoid state pollution
     auto start        = std::chrono::high_resolution_clock::now();
-    mas::set_params( solver, params );  // variant-safe call
-    mas::solve( solver, problem_copy ); // variant-safe call
-    // print best states and controls
-    std::cout << "Solver: " << name << "\n";
-    std::cout << "Best states:\n" << problem_copy.best_states << "\n";
-    std::cout << "Best controls:\n" << problem_copy.best_controls << "\n";
-
-    auto end = std::chrono::high_resolution_clock::now();
-
+    mas::set_params( solver, params );
+    mas::solve( solver, problem_copy );
+    auto end      = std::chrono::high_resolution_clock::now();
     results[name] = { problem_copy.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
   }
 

@@ -77,7 +77,6 @@ struct OCP
   void
   reset()
   {
-    std::cerr << "resetting OCP" << std::endl;
     initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
     initial_states   = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
 

@@ -42,9 +42,8 @@ struct OCP
   State       initial_state;
   MotionModel dynamics;
 
-  StageCostFunction    stage_cost;
-  TerminalCostFunction terminal_cost;
-
+  StageCostFunction    stage_cost    = []( const State&, const Control&, size_t ) { return 0.0; };
+  TerminalCostFunction terminal_cost = []( const State& ) { return 0.0; };
   // objective function is sum of all stage costs + terminal cost
   ObjectiveFunction objective_function;
 
@@ -123,7 +122,7 @@ struct OCP
     if( !cost_cross_term )
       cost_cross_term = compute_cost_cross_term;
 
-    if( !objective_function && stage_cost && terminal_cost )
+    if( !objective_function )
     {
       auto stage_cost_local    = stage_cost;
       auto terminal_cost_local = terminal_cost;

@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "multi_agent_solver/agent.hpp"
-#include "multi_agent_solver/coupling.hpp"
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/ocp.hpp"
 
@@ -27,19 +26,12 @@ class MultiAgentProblem
 public:
 
   std::vector<AgentPtr>       agents;
-  InteractionGraph            graph;
   std::vector<AgentBlockInfo> blocks;
 
   void
   add_agent( const AgentPtr& a )
   {
     agents.push_back( a );
-  }
-
-  void
-  add_coupling( const CouplingPtr& c )
-  {
-    graph.add_coupling( c );
   }
 
   void
@@ -132,23 +124,6 @@ public:
     g.initialize_problem();
     g.verify_problem();
     return g;
-  }
-
-  struct LocalView
-  {
-    AgentPtr                 agent;
-    std::vector<CouplingPtr> couplings;
-  };
-
-  LocalView
-  get_local_view( std::size_t id ) const
-  {
-    LocalView view;
-    for( auto& a : agents )
-      if( a->id == id )
-        view.agent = a;
-    view.couplings = graph.for_agent( id );
-    return view;
   }
 };
 

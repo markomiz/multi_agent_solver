@@ -4,7 +4,7 @@
 #include <map>
 #include <string>
 
-#include "multi_agent_solver/models/single_track_model.hpp"
+#include "models/single_track_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"

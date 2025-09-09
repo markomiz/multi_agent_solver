@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "models/single_track_model.hpp"
 #include "multi_agent_solver/agent.hpp"
-#include "multi_agent_solver/models/single_track_model.hpp"
 #include "multi_agent_solver/multi_agent_problem.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/strategies/strategy.hpp"

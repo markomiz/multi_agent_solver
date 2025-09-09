@@ -74,24 +74,39 @@ If you prefer to build manually:
 
 Times and costs for different methods in the example code:
 ```
-========================================================================================
-Outer Method                            Solver              Time (ms)           Cost                
-========================================================================================
- Centralized                            CGD                 117.26              86.9948             
- Centralized                            OSQP                3685.16             75.9386             
- Centralized                            iLQR                2079.98             77.6986             
- Decentralized_Line_Search              CGD                 106.85              77.3723             
- Decentralized_Line_Search              OSQP                34.80               74.5437             
- Decentralized_Line_Search              iLQR                11.27               77.7030             
- Decentralized_Simple                   CGD                 138.99              77.7806             
- Decentralized_Simple                   OSQP                43.13               74.9514             
- Decentralized_Simple                   iLQR                10.17               78.1107             
- Decentralized_Trust_Region             CGD                 3.02                87.4026             
- Decentralized_Trust_Region             OSQP                9.96                76.3330             
- Decentralized_Trust_Region             iLQR                6.02                78.1107             
-=======================================================================================
+🚗 Single-Track Lane Following Test 🚗
+---------------------------------------------
+Solver              Cost           Time (ms)
+     ---------------------------------------------
+CGD                 24.0465        20.6444        
+OSQP                30.1889        2.33275        
+OSQP Collocation    23.9809        5.11993        
+iLQR                24.4039        1.06887 
 ```
 
+```
+
+Multi-Agent Single Track Test
+
+Method                                  Cost           Time (ms)      
+----------------------------------------------------------------------
+Centralized CGD                         7928.151       1214.919       
+Centralized iLQR                        7928.501       135.472        
+Centralized OSQP                        7929.011       285.711        
+Centralized OSQP-collocation            7929.392       1071.582       
+Nash Sequential CGD                     7928.153       26.612         
+Nash Sequential iLQR                    7928.327       11.053         
+Nash Sequential OSQP                    7928.384       38.514         
+Nash Sequential OSQP-collocation        7928.158       2098.299       
+Nash LineSearch CGD                     7928.153       27.597         
+Nash LineSearch iLQR                    7928.327       13.807         
+Nash LineSearch OSQP                    7928.384       40.643         
+Nash LineSearch OSQP-collocation        7928.152       2010.733       
+Nash TrustRegion CGD                    7928.153       34.767         
+Nash TrustRegion iLQR                   7928.199       14.093         
+Nash TrustRegion OSQP                   7928.417       46.087         
+Nash TrustRegion OSQP-collocation       7928.152       1596.460 
+```
 
 ## License
 Apache 2.0

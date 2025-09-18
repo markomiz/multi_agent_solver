@@ -62,6 +62,11 @@ struct OCP
   ConstraintsFunction equality_constraints;
   ConstraintsFunction inequality_constraints;
 
+  ConstraintsJacobianFunction equality_constraints_state_jacobian;
+  ConstraintsJacobianFunction equality_constraints_control_jacobian;
+  ConstraintsJacobianFunction inequality_constraints_state_jacobian;
+  ConstraintsJacobianFunction inequality_constraints_control_jacobian;
+
   // Optional analytical derivatives
   DynamicsStateJacobian   dynamics_state_jacobian;
   DynamicsControlJacobian dynamics_control_jacobian;
@@ -121,6 +126,42 @@ struct OCP
       cost_control_hessian = compute_cost_control_hessian;
     if( !cost_cross_term )
       cost_cross_term = compute_cost_cross_term;
+
+    if( equality_constraints )
+    {
+      if( !equality_constraints_state_jacobian )
+      {
+        auto equality_fn = equality_constraints;
+        equality_constraints_state_jacobian = [equality_fn]( const State& state, const Control& control ) {
+          return compute_constraints_state_jacobian( equality_fn, state, control );
+        };
+      }
+      if( !equality_constraints_control_jacobian )
+      {
+        auto equality_fn = equality_constraints;
+        equality_constraints_control_jacobian = [equality_fn]( const State& state, const Control& control ) {
+          return compute_constraints_control_jacobian( equality_fn, state, control );
+        };
+      }
+    }
+
+    if( inequality_constraints )
+    {
+      if( !inequality_constraints_state_jacobian )
+      {
+        auto inequality_fn = inequality_constraints;
+        inequality_constraints_state_jacobian = [inequality_fn]( const State& state, const Control& control ) {
+          return compute_constraints_state_jacobian( inequality_fn, state, control );
+        };
+      }
+      if( !inequality_constraints_control_jacobian )
+      {
+        auto inequality_fn = inequality_constraints;
+        inequality_constraints_control_jacobian = [inequality_fn]( const State& state, const Control& control ) {
+          return compute_constraints_control_jacobian( inequality_fn, state, control );
+        };
+      }
+    }
 
     if( !objective_function )
     {

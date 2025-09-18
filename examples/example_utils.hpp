@@ -33,6 +33,8 @@ canonical_solver_name( const std::string& name )
   const std::string key = normalize_key( name );
   if( key == "ilqr" )
     return "ilqr";
+  if( key == "primaldualilqr" || key == "pdilqr" || key == "primal_dual_ilqr" )
+    return "ilqr";
   if( key == "cgd" )
     return "cgd";
 #ifdef MAS_HAVE_OSQP

@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import json
 import tempfile
@@ -204,57 +205,106 @@ def load_solution_json(path: Path) -> Optional[Dict[str, Any]]:
     return None
 
 
-def plot_state_trajectories(data: Dict[str, Any], example: str, plot_dir: Path) -> None:
-    agents = data.get("agents", [])
-    if not isinstance(agents, list):
-        sys.stderr.write("Warning: malformed solution JSON (missing agents list).\n")
-        return
+def _prepare_solution_agents(data: Dict[str, Any]) -> Dict[Any, Dict[str, Any]]:
+    agents_raw = data.get("agents", [])
+    if not isinstance(agents_raw, list):
+        return {}
 
-    solver = str(data.get("solver", "unknown"))
-    strategy = data.get("strategy")
-    if strategy is not None:
-        strategy = str(strategy)
-
-    plt = get_pyplot()
-    for agent in agents:
+    prepared: Dict[Any, Dict[str, Any]] = {}
+    for agent in agents_raw:
         if not isinstance(agent, dict):
             continue
         states = agent.get("states", [])
-        if not states:
+        if not isinstance(states, list) or not states:
             continue
-        dt = float(agent.get("dt", 1.0))
-        times = [idx * dt for idx in range(len(states))]
-        dims = len(states[0]) if states and isinstance(states[0], list) else 0
-        if dims == 0:
-            continue
+        prepared[agent.get("id", 0)] = agent
+    return prepared
 
-        fig, ax = plt.subplots()
-        for dim in range(dims):
-            series = [step[dim] for step in states if len(step) > dim]
-            if not series:
+
+def plot_example_solutions(
+    example: str,
+    strategy: Optional[str],
+    solutions: List[Tuple[str, Dict[str, Any]]],
+    plot_dir: Path,
+) -> None:
+    prepared: List[Tuple[str, Dict[Any, Dict[str, Any]]]] = []
+    agent_order: List[Any] = []
+
+    for solver, data in solutions:
+        agent_map = _prepare_solution_agents(data)
+        if not agent_map:
+            continue
+        prepared.append((solver, agent_map))
+        for identifier in agent_map.keys():
+            if identifier not in agent_order:
+                agent_order.append(identifier)
+
+    if not prepared or not agent_order:
+        sys.stderr.write(
+            f"Warning: no valid state data found for example '{example}'"
+            f"{' strategy ' + strategy if strategy else ''}.\n"
+        )
+        return
+
+    n_agents = len(agent_order)
+    n_solutions = len(prepared)
+
+    plt = get_pyplot()
+    fig_width = max(4.0, 4.0 * n_solutions)
+    fig_height = max(2.5, 2.5 * n_agents)
+    fig, axes = plt.subplots(
+        n_agents,
+        n_solutions,
+        squeeze=False,
+        sharex="col",
+        figsize=(fig_width, fig_height),
+    )
+
+    for col, (solver, agent_map) in enumerate(prepared):
+        for row, agent_id in enumerate(agent_order):
+            ax = axes[row][col]
+            agent = agent_map.get(agent_id)
+            if agent is None:
+                ax.set_visible(False)
                 continue
-            ax.plot(times[: len(series)], series, label=f"x{dim}")
-        ax.set_xlabel("time [s]")
-        ax.set_ylabel("state")
 
-        title_parts = [example, solver]
-        if strategy:
-            title_parts.append(strategy)
-        title_parts.append(f"agent {agent.get('id', 0)}")
-        ax.set_title(" / ".join(title_parts))
-        if dims > 1:
-            ax.legend()
-        fig.tight_layout()
+            states = agent.get("states", [])
+            dt = float(agent.get("dt", 1.0))
+            times = [idx * dt for idx in range(len(states))]
+            dims = len(states[0]) if states and isinstance(states[0], list) else 0
+            for dim in range(dims):
+                series = [step[dim] for step in states if len(step) > dim]
+                if not series:
+                    continue
+                ax.plot(times[: len(series)], series, label=f"x{dim}")
 
-        filename_parts = [example, solver]
-        if strategy:
-            filename_parts.append(strategy)
-        filename_parts.append(f"agent{agent.get('id', 0)}")
-        filename = "_".join(sanitize_name(part) for part in filename_parts) + "_states.png"
-        save_path = plot_dir / filename
-        fig.savefig(save_path)
-        plt.close(fig)
-        print(f"Saved state plot to {save_path}")
+            if row == 0:
+                title_parts = [solver]
+                if strategy:
+                    title_parts.append(strategy)
+                ax.set_title(" / ".join(title_parts))
+                if dims > 1:
+                    ax.legend(loc="upper right", fontsize="small")
+            if row == n_agents - 1:
+                ax.set_xlabel("time [s]")
+            if col == 0:
+                ax.set_ylabel(f"agent {agent_id}")
+
+    sup_title = f"{example} state trajectories"
+    if strategy:
+        sup_title += f" ({strategy})"
+    fig.suptitle(sup_title)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    filename_parts = [example]
+    if strategy:
+        filename_parts.append(strategy)
+    filename_parts.append("states")
+    filename = "_".join(sanitize_name(part) for part in filename_parts) + ".png"
+    save_path = plot_dir / filename
+    fig.savefig(save_path)
+    plt.close(fig)
+    print(f"Saved state plot to {save_path}")
 
 
 def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
@@ -322,6 +372,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     results: Dict[str, List[Dict[str, str]]] = {
         example: [] for example in args.examples}
+    plot_requests: Dict[
+        str, Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]]
+    ] = {example: defaultdict(list) for example in args.examples}
 
     for example in args.examples:
         executable = build_dir / example
@@ -377,7 +430,9 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         if dump_path.exists():
                             dump_path.unlink()
                         if solution_data and plot_dir is not None:
-                            plot_state_trajectories(solution_data, example, plot_dir)
+                            plot_requests[example][strategy].append(
+                                (solver, solution_data)
+                            )
         else:
             for solver in args.solvers:
                 cmd = [str(executable), f"--solver={solver}"]
@@ -417,7 +472,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     if dump_path.exists():
                         dump_path.unlink()
                     if solution_data and plot_dir is not None:
-                        plot_state_trajectories(solution_data, example, plot_dir)
+                        plot_requests[example][None].append((solver, solution_data))
+
+    if args.plot_states and plot_dir is not None:
+        for example, strategy_map in plot_requests.items():
+            for strategy, solutions in strategy_map.items():
+                if solutions:
+                    plot_example_solutions(example, strategy, solutions, plot_dir)
 
     for example in args.examples:
         rows = results.get(example, [])

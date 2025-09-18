@@ -1,8 +1,10 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "models/single_track_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -10,6 +12,7 @@
 #include "multi_agent_solver/types.hpp"
 
 #include "example_utils.hpp"
+#include "solution_export.hpp"
 
 mas::OCP
 create_single_track_lane_following_ocp()
@@ -119,6 +122,7 @@ struct Options
 {
   bool        show_help = false;
   std::string solver    = "ilqr";
+  std::optional<std::string> dump_json;
 };
 
 namespace
@@ -158,6 +162,10 @@ parse_options( int argc, char** argv )
     if( match_with_value( "--solver", value ) )
     {
       options.solver = value;
+    }
+    else if( match_with_value( "--dump-json", value ) )
+    {
+      options.dump_json = value;
     }
     else
     {
@@ -211,6 +219,13 @@ main( int argc, char** argv )
               << " cost=" << problem.best_cost
               << " time_ms=" << elapsed_ms
               << '\n';
+
+    if( options.dump_json )
+    {
+      std::vector<examples::SolutionExportAgentView> views;
+      views.push_back( examples::SolutionExportAgentView{ 0, problem.dt, &problem.best_states } );
+      examples::write_solution_json( *options.dump_json, solver_name, views );
+    }
   }
   catch( const std::exception& e )
   {

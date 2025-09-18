@@ -7,7 +7,10 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
+
+import json
+import tempfile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -100,6 +103,17 @@ def parse_arguments(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Print commands before executing them and echo their stderr output.",
     )
+    parser.add_argument(
+        "--plot-states",
+        action="store_true",
+        help="Generate matplotlib plots of state trajectories for successful runs.",
+    )
+    parser.add_argument(
+        "--plot-dir",
+        type=Path,
+        default=None,
+        help="Directory to store generated plots (defaults to ./plots when --plot-states is used).",
+    )
     return parser.parse_args(argv)
 
 
@@ -160,6 +174,89 @@ def ensure_build(build_type: str, verbose: bool) -> None:
         )
 
 
+def sanitize_name(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in value)
+
+
+_PYPLOT = None
+
+
+def get_pyplot():  # type: ignore[override]
+    global _PYPLOT
+    if _PYPLOT is None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from matplotlib import pyplot as plt
+
+        _PYPLOT = plt
+    return _PYPLOT
+
+
+def load_solution_json(path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        sys.stderr.write(f"Warning: solution dump '{path}' was not created.\n")
+    except json.JSONDecodeError as exc:
+        sys.stderr.write(f"Warning: failed to parse JSON from '{path}': {exc}\n")
+    return None
+
+
+def plot_state_trajectories(data: Dict[str, Any], example: str, plot_dir: Path) -> None:
+    agents = data.get("agents", [])
+    if not isinstance(agents, list):
+        sys.stderr.write("Warning: malformed solution JSON (missing agents list).\n")
+        return
+
+    solver = str(data.get("solver", "unknown"))
+    strategy = data.get("strategy")
+    if strategy is not None:
+        strategy = str(strategy)
+
+    plt = get_pyplot()
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        states = agent.get("states", [])
+        if not states:
+            continue
+        dt = float(agent.get("dt", 1.0))
+        times = [idx * dt for idx in range(len(states))]
+        dims = len(states[0]) if states and isinstance(states[0], list) else 0
+        if dims == 0:
+            continue
+
+        fig, ax = plt.subplots()
+        for dim in range(dims):
+            series = [step[dim] for step in states if len(step) > dim]
+            if not series:
+                continue
+            ax.plot(times[: len(series)], series, label=f"x{dim}")
+        ax.set_xlabel("time [s]")
+        ax.set_ylabel("state")
+
+        title_parts = [example, solver]
+        if strategy:
+            title_parts.append(strategy)
+        title_parts.append(f"agent {agent.get('id', 0)}")
+        ax.set_title(" / ".join(title_parts))
+        if dims > 1:
+            ax.legend()
+        fig.tight_layout()
+
+        filename_parts = [example, solver]
+        if strategy:
+            filename_parts.append(strategy)
+        filename_parts.append(f"agent{agent.get('id', 0)}")
+        filename = "_".join(sanitize_name(part) for part in filename_parts) + "_states.png"
+        save_path = plot_dir / filename
+        fig.savefig(save_path)
+        plt.close(fig)
+        print(f"Saved state plot to {save_path}")
+
+
 def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
     if not rows:
         return "(no successful runs)"
@@ -218,6 +315,11 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         build_dir = (REPO_ROOT / "build" / build_type.lower()).resolve()
 
+    plot_dir: Optional[Path] = None
+    if args.plot_states:
+        plot_dir = (args.plot_dir or Path("plots")).resolve()
+        plot_dir.mkdir(parents=True, exist_ok=True)
+
     results: Dict[str, List[Dict[str, str]]] = {
         example: [] for example in args.examples}
 
@@ -238,6 +340,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         f"--agents={args.agents}",
                         f"--max-outer={args.max_outer}",
                     ]
+                    dump_path: Optional[Path] = None
+                    if args.plot_states:
+                        tmp = tempfile.NamedTemporaryFile(prefix=f"{example}_", suffix=".json", delete=False)
+                        dump_path = Path(tmp.name)
+                        tmp.close()
+                        cmd.append(f"--dump-json={dump_path}")
                     result = run_command(cmd, args.timeout, args.verbose)
                     if result.returncode != 0:
                         sys.stderr.write(
@@ -245,6 +353,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         )
                         if result.stderr:
                             sys.stderr.write(result.stderr + "\n")
+                        if dump_path is not None and dump_path.exists():
+                            dump_path.unlink()
                         if args.fail_fast:
                             return result.returncode or 1
                         continue
@@ -253,6 +363,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         sys.stderr.write(
                             f"Error: could not parse output from '{example}' with solver={solver} strategy={strategy}.\n"
                         )
+                        if dump_path is not None and dump_path.exists():
+                            dump_path.unlink()
                         if args.fail_fast:
                             return 1
                         continue
@@ -260,9 +372,21 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     data.setdefault("solver", solver)
                     data.setdefault("strategy", strategy)
                     results[example].append(data)
+                    if args.plot_states and dump_path is not None:
+                        solution_data = load_solution_json(dump_path)
+                        if dump_path.exists():
+                            dump_path.unlink()
+                        if solution_data and plot_dir is not None:
+                            plot_state_trajectories(solution_data, example, plot_dir)
         else:
             for solver in args.solvers:
                 cmd = [str(executable), f"--solver={solver}"]
+                dump_path: Optional[Path] = None
+                if args.plot_states:
+                    tmp = tempfile.NamedTemporaryFile(prefix=f"{example}_", suffix=".json", delete=False)
+                    dump_path = Path(tmp.name)
+                    tmp.close()
+                    cmd.append(f"--dump-json={dump_path}")
                 result = run_command(cmd, args.timeout, args.verbose)
                 if result.returncode != 0:
                     sys.stderr.write(
@@ -270,6 +394,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     )
                     if result.stderr:
                         sys.stderr.write(result.stderr + "\n")
+                    if dump_path is not None and dump_path.exists():
+                        dump_path.unlink()
                     if args.fail_fast:
                         return result.returncode or 1
                     continue
@@ -278,12 +404,20 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     sys.stderr.write(
                         f"Error: could not parse output from '{example}' with solver={solver}.\n"
                     )
+                    if dump_path is not None and dump_path.exists():
+                        dump_path.unlink()
                     if args.fail_fast:
                         return 1
                     continue
                 data = parse_result_line(line)
                 data.setdefault("solver", solver)
                 results[example].append(data)
+                if args.plot_states and dump_path is not None:
+                    solution_data = load_solution_json(dump_path)
+                    if dump_path.exists():
+                        dump_path.unlink()
+                    if solution_data and plot_dir is not None:
+                        plot_state_trajectories(solution_data, example, plot_dir)
 
     for example in args.examples:
         rows = results.get(example, [])

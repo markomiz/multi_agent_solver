@@ -5,8 +5,10 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "Eigen/Dense"
 
@@ -17,6 +19,7 @@
 #include "multi_agent_solver/types.hpp"
 
 #include "example_utils.hpp"
+#include "solution_export.hpp"
 
 /*──────────────── create simple LQR OCP (unchanged) ───────────────*/
 mas::OCP
@@ -53,6 +56,7 @@ struct Options
   int         max_outer   = 10;
   std::string solver      = "ilqr";
   std::string strategy    = "centralized";
+  std::optional<std::string> dump_json;
 };
 
 namespace
@@ -124,6 +128,10 @@ parse_options( int argc, char** argv )
     {
       options.max_outer = parse_int( "--max-outer", value );
     }
+    else if( match_with_value( "--dump-json", value ) )
+    {
+      options.dump_json = value;
+    }
     else if( !arg.empty() && arg.front() != '-' && !positional_agents )
     {
       options.agents      = parse_int( "agents", arg );
@@ -194,6 +202,19 @@ main( int argc, char** argv )
               << " cost=" << solution.total_cost
               << " time_ms=" << elapsed_ms
               << '\n';
+
+    if( options.dump_json )
+    {
+      std::vector<examples::SolutionExportAgentView> views;
+      views.reserve( problem.blocks.size() );
+      const std::size_t count = std::min( problem.blocks.size(), solution.states.size() );
+      for( std::size_t idx = 0; idx < count; ++idx )
+      {
+        const auto& block = problem.blocks[idx];
+        views.push_back( examples::SolutionExportAgentView{ block.agent_id, block.agent->ocp->dt, &solution.states[idx] } );
+      }
+      examples::write_solution_json( *options.dump_json, solver_name, views, strategy_name );
+    }
   }
   catch( const std::exception& e )
   {

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <system_error>
@@ -77,6 +78,12 @@ parse_options( int argc, char** argv )
   for( int i = 1; i < argc; ++i )
   {
     std::string arg = argv[i];
+    if( arg.rfind( "--", 0 ) == 0 )
+    {
+      const auto eq_pos = arg.find( '=' );
+      const auto end    = eq_pos == std::string::npos ? arg.size() : eq_pos;
+      std::replace( arg.begin() + 2, arg.begin() + static_cast<std::ptrdiff_t>( end ), '_', '-' );
+    }
     auto        match_with_value = [&]( const std::string& name, std::string& out ) {
       const std::string prefix = name + "=";
       if( arg == name )

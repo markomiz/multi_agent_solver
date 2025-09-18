@@ -227,4 +227,62 @@ compute_cost_cross_term( const StageCostFunction& stage_cost, const State& x, co
   }
   return H;
 }
+
+inline ConstraintsJacobian
+compute_constraints_state_jacobian( const ConstraintsFunction& constraint, const State& x, const Control& u )
+{
+  if( !constraint )
+    return ConstraintsJacobian{};
+
+  const ConstraintViolations base = constraint( x, u );
+  const int                  m    = static_cast<int>( base.size() );
+  if( m == 0 )
+    return ConstraintsJacobian{};
+
+  const int       n       = static_cast<int>( x.size() );
+  const double    epsilon = 1e-6;
+  ConstraintsJacobian J   = ConstraintsJacobian::Zero( m, n );
+
+  for( int i = 0; i < n; ++i )
+  {
+    State dx = State::Zero( n );
+    dx( i )  = epsilon;
+
+    ConstraintViolations f_plus  = constraint( x + dx, u );
+    ConstraintViolations f_minus = constraint( x - dx, u );
+
+    J.col( i ) = ( f_plus - f_minus ) / ( 2 * epsilon );
+  }
+
+  return J;
+}
+
+inline ConstraintsJacobian
+compute_constraints_control_jacobian( const ConstraintsFunction& constraint, const State& x, const Control& u )
+{
+  if( !constraint )
+    return ConstraintsJacobian{};
+
+  const ConstraintViolations base = constraint( x, u );
+  const int                  m    = static_cast<int>( base.size() );
+  if( m == 0 )
+    return ConstraintsJacobian{};
+
+  const int       p       = static_cast<int>( u.size() );
+  const double    epsilon = 1e-6;
+  ConstraintsJacobian J   = ConstraintsJacobian::Zero( m, p );
+
+  for( int i = 0; i < p; ++i )
+  {
+    Control du = Control::Zero( p );
+    du( i )    = epsilon;
+
+    ConstraintViolations f_plus  = constraint( x, u + du );
+    ConstraintViolations f_minus = constraint( x, u - du );
+
+    J.col( i ) = ( f_plus - f_minus ) / ( 2 * epsilon );
+  }
+
+  return J;
+}
 } // namespace mas

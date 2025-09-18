@@ -33,6 +33,8 @@ canonical_solver_name( const std::string& name )
   const std::string key = normalize_key( name );
   if( key == "ilqr" )
     return "ilqr";
+  if( key == "primaldualilqr" || key == "pdilqr" || key == "primal_dual_ilqr" )
+    return "primal_dual_ilqr";
   if( key == "cgd" )
     return "cgd";
 #ifdef MAS_HAVE_OSQP
@@ -62,7 +64,7 @@ canonical_strategy_name( const std::string& name )
 inline std::vector<std::string>
 available_solver_names()
 {
-  std::vector<std::string> names{ "ilqr", "cgd" };
+  std::vector<std::string> names{ "ilqr", "primal_dual_ilqr", "cgd" };
 #ifdef MAS_HAVE_OSQP
   names.push_back( "osqp" );
   names.push_back( "osqp_collocation" );
@@ -76,6 +78,8 @@ make_solver( const std::string& name )
   const std::string canonical = canonical_solver_name( name );
   if( canonical == "ilqr" )
     return mas::Solver{ std::in_place_type<mas::iLQR> };
+  if( canonical == "primal_dual_ilqr" )
+    return mas::Solver{ std::in_place_type<mas::PrimalDualiLQR> };
   if( canonical == "cgd" )
     return mas::Solver{ std::in_place_type<mas::CGD> };
 #ifdef MAS_HAVE_OSQP

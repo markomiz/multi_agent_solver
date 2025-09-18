@@ -101,7 +101,7 @@ public:
 
       increase_penalty_parameter( penalty_param, problem, state_trajectory, controls, tolerance );
 
-      if( std::abs( old_cost - trial_cost ) < tolerance )
+      if( std::abs( old_cost - trial_cost ) < tolerance && debug )
       {
         std::cout << "CGD solver converged in " << iter << "steps" << std::endl;
         break;

@@ -39,19 +39,35 @@ collect_solution( MultiAgentProblem& problem )
 inline double
 total_cost( MultiAgentProblem& problem )
 {
-  double c = 0.0;
-  for( auto& blk : problem.blocks )
-    c += blk.agent->ocp->best_cost;
+  double    c = 0.0;
+  const int n = static_cast<int>( problem.blocks.size() );
+
+#pragma omp parallel for reduction( + : c ) schedule( static )
+  for( int i = 0; i < n; ++i )
+  {
+    c += problem.blocks[static_cast<std::size_t>( i )].agent->ocp->best_cost;
+  }
   return c;
 }
 
 inline void
 sequential_solve( std::vector<Solver>& solvers, MultiAgentProblem& problem )
 {
-  for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+  // Parallel Jacobi step: solve all -> update all
+  const int n = static_cast<int>( problem.blocks.size() );
+
+#pragma omp parallel for schedule( static )
+  for( int i = 0; i < n; ++i )
   {
-    mas::solve( solvers[i], *problem.blocks[i].agent->ocp );
-    problem.blocks[i].agent->update_initial_with_best();
+    auto idx = static_cast<std::size_t>( i );
+    mas::solve( solvers[idx], *problem.blocks[idx].agent->ocp );
+  }
+
+#pragma omp parallel for schedule( static )
+  for( int i = 0; i < n; ++i )
+  {
+    auto idx = static_cast<std::size_t>( i );
+    problem.blocks[idx].agent->update_initial_with_best();
   }
 }
 
@@ -88,9 +104,11 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
   double base_cost = total_cost( problem );
   for( int outer = 0; outer < max_outer; ++outer )
   {
-    std::vector<ControlTrajectory> old_controls( problem.blocks.size() );
-    std::vector<StateTrajectory>   old_states( problem.blocks.size() );
-    for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+    const int n = static_cast<int>( problem.blocks.size() );
+
+    std::vector<ControlTrajectory> old_controls( n );
+    std::vector<StateTrajectory>   old_states( n );
+    for( std::size_t i = 0; i < n; ++i )
     {
       auto& ocp       = *problem.blocks[i].agent->ocp;
       old_controls[i] = ocp.best_controls;
@@ -102,27 +120,29 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
 
     if( new_cost >= base_cost )
     {
-      std::vector<ControlTrajectory> cand_controls( problem.blocks.size() );
-      for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+      std::vector<ControlTrajectory> cand_controls( n );
+      for( std::size_t i = 0; i < n; ++i )
         cand_controls[i] = problem.blocks[i].agent->ocp->best_controls;
 
       double alpha    = 0.5;
       bool   accepted = false;
       while( alpha > 1e-3 && !accepted )
       {
-        std::vector<ControlTrajectory> trial_controls( problem.blocks.size() );
-        std::vector<StateTrajectory>   trial_states( problem.blocks.size() );
+        std::vector<ControlTrajectory> trial_controls( n );
+        std::vector<StateTrajectory>   trial_states( n );
         double                         trial_cost = 0.0;
-        for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+#pragma omp parallel for reduction( + : trial_cost ) schedule( static )
+        for( int i = 0; i < n; ++i )
         {
-          auto& ocp          = *problem.blocks[i].agent->ocp;
-          trial_controls[i]  = old_controls[i] + alpha * ( cand_controls[i] - old_controls[i] );
-          trial_states[i]    = integrate_horizon( ocp.initial_state, trial_controls[i], ocp.dt, ocp.dynamics, integrate_rk4 );
-          trial_cost        += ocp.objective_function( trial_states[i], trial_controls[i] );
+          auto  idx            = static_cast<std::size_t>( i );
+          auto& ocp            = *problem.blocks[idx].agent->ocp;
+          trial_controls[idx]  = old_controls[idx] + alpha * ( cand_controls[idx] - old_controls[idx] );
+          trial_states[idx]    = integrate_horizon( ocp.initial_state, trial_controls[idx], ocp.dt, ocp.dynamics, integrate_rk4 );
+          trial_cost          += ocp.objective_function( trial_states[idx], trial_controls[idx] );
         }
         if( trial_cost < base_cost )
         {
-          for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+          for( std::size_t i = 0; i < n; ++i )
           {
             auto& ocp         = *problem.blocks[i].agent->ocp;
             ocp.best_controls = trial_controls[i];
@@ -140,7 +160,7 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
       }
       if( !accepted )
       {
-        for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+        for( std::size_t i = 0; i < n; ++i )
         {
           auto& ocp         = *problem.blocks[i].agent->ocp;
           ocp.best_controls = old_controls[i];
@@ -175,16 +195,21 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
 
   for( int outer = 0; outer < max_outer; ++outer )
   {
-    for( std::size_t i = 0; i < problem.blocks.size(); ++i )
+    const int n = static_cast<int>( problem.blocks.size() );
+#ifdef _OPENMP
+  #pragma omp parallel for schedule( static )
+#endif
+    for( int i = 0; i < n; ++i )
     {
-      auto& blk = problem.blocks[i];
+      auto  idx = static_cast<std::size_t>( i );
+      auto& blk = problem.blocks[idx];
       auto& ocp = *blk.agent->ocp;
 
       ControlTrajectory old_u    = ocp.best_controls;
       StateTrajectory   old_x    = ocp.best_states;
       double            old_cost = ocp.best_cost;
 
-      mas::solve( solvers[i], ocp );
+      mas::solve( solvers[idx], ocp );
 
       ControlTrajectory cand_u    = ocp.best_controls;
       StateTrajectory   cand_x    = ocp.best_states;
@@ -192,9 +217,9 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
 
       ControlTrajectory delta = cand_u - old_u;
       double            norm  = delta.norm();
-      if( norm > radii[i] )
+      if( norm > radii[idx] )
       {
-        double scale = radii[i] / norm;
+        double scale = radii[idx] / norm;
         cand_u       = old_u + scale * delta;
         cand_x       = integrate_horizon( ocp.initial_state, cand_u, ocp.dt, ocp.dynamics, integrate_rk4 );
         cand_cost    = ocp.objective_function( cand_x, cand_u );
@@ -206,7 +231,7 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
         ocp.best_states   = cand_x;
         ocp.best_cost     = cand_cost;
         ocp.update_initial_with_best();
-        radii[i] *= 1.5;
+        radii[idx] *= 1.5;
       }
       else
       {
@@ -214,7 +239,7 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
         ocp.best_states   = old_x;
         ocp.best_cost     = old_cost;
         ocp.update_initial_with_best();
-        radii[i] *= 0.5;
+        radii[idx] *= 0.5;
       }
     }
   }

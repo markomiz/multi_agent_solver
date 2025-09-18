@@ -66,7 +66,7 @@ main( int argc, char** argv )
   const int        num_agents      = ( argc > 1 ) ? std::stoi( argv[1] ) : 10;
   constexpr int    time_steps      = 10;
   constexpr double track_radius    = 20.0;
-  constexpr double target_velocity = 10.0;
+  constexpr double target_velocity = 5.0;
 
   MultiAgentProblem problem;
   for( int i = 0; i < num_agents; ++i )

@@ -8,6 +8,7 @@
 
 #include <Eigen/Dense>
 
+#include "multi_agent_solver/constraint_helpers.hpp"
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/types.hpp"
@@ -62,6 +63,9 @@ public:
 
     StateTrajectory   x = problem.best_states;
     ControlTrajectory u = problem.best_controls;
+    const bool        clamped_initial = enforce_input_bounds( u, problem );
+    if( clamped_initial )
+      x = integrate_horizon( problem.initial_state, u, problem.dt, problem.dynamics, integrate_rk4 );
     double            cost
       = problem.objective_function ? problem.objective_function( x, u ) : problem.best_cost;
 
@@ -118,6 +122,7 @@ public:
       ControlTrajectory candidate_u = u;
 
       apply_step( step, candidate_x, candidate_u );
+      enforce_input_bounds( candidate_u, problem );
       candidate_x.col( 0 ) = problem.initial_state;
 
       double candidate_cost = problem.objective_function( candidate_x, candidate_u );
@@ -132,6 +137,7 @@ public:
         candidate_x = x;
         candidate_u = u;
         apply_step( alpha * step, candidate_x, candidate_u );
+        enforce_input_bounds( candidate_u, problem );
         candidate_x.col( 0 ) = problem.initial_state;
 
         candidate_cost = problem.objective_function( candidate_x, candidate_u );
@@ -353,6 +359,17 @@ private:
       const int iu = x_vars + t * nu;
       u.col( t ) += step.segment( iu, nu );
     }
+  }
+
+  bool
+  enforce_input_bounds( ControlTrajectory& u, const OCP& problem ) const
+  {
+    if( problem.input_lower_bounds && problem.input_upper_bounds )
+    {
+      clamp_controls( u, *problem.input_lower_bounds, *problem.input_upper_bounds );
+      return true;
+    }
+    return false;
   }
 
   double

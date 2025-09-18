@@ -1,9 +1,12 @@
+#include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <system_error>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
-#include <tuple>
-#include <vector>
 
 #include "Eigen/Dense"
 
@@ -12,6 +15,8 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/strategies/strategy.hpp"
 #include "multi_agent_solver/types.hpp"
+
+#include "example_utils.hpp"
 
 /*──────────────── create simple LQR OCP (unchanged) ───────────────*/
 mas::OCP
@@ -41,123 +46,160 @@ create_linear_lqr_ocp( int n_x, int n_u, double dt, int T )
   return ocp;
 }
 
-struct Result
+struct Options
 {
-  std::string name;
-  double      cost;
-  double      time_ms;
+  bool        show_help   = false;
+  int         agents      = 10;
+  int         max_outer   = 10;
+  std::string solver      = "ilqr";
+  std::string strategy    = "centralized";
 };
+
+namespace
+{
+
+int
+parse_int( const std::string& label, const std::string& value )
+{
+  int result = 0;
+  const char* begin = value.data();
+  const char* end   = begin + value.size();
+  const auto   [ptr, ec] = std::from_chars( begin, end, result );
+  if( ec != std::errc() || ptr != end )
+    throw std::invalid_argument( "Invalid value for " + label + ": '" + value + "'" );
+  return result;
+}
+
+Options
+parse_options( int argc, char** argv )
+{
+  Options options;
+  bool    positional_agents = false;
+  for( int i = 1; i < argc; ++i )
+  {
+    std::string arg = argv[i];
+    if( arg.rfind( "--", 0 ) == 0 )
+    {
+      const auto eq_pos = arg.find( '=' );
+      const auto end    = eq_pos == std::string::npos ? arg.size() : eq_pos;
+      std::replace( arg.begin() + 2, arg.begin() + static_cast<std::ptrdiff_t>( end ), '_', '-' );
+    }
+    auto        match_with_value = [&]( const std::string& name, std::string& out ) {
+      const std::string prefix = name + "=";
+      if( arg == name )
+      {
+        if( i + 1 >= argc )
+          throw std::invalid_argument( "Missing value for option '" + name + "'" );
+        out = argv[++i];
+        return true;
+      }
+      if( arg.rfind( prefix, 0 ) == 0 )
+      {
+        out = arg.substr( prefix.size() );
+        return true;
+      }
+      return false;
+    };
+
+    if( arg == "--help" || arg == "-h" )
+    {
+      options.show_help = true;
+      continue;
+    }
+
+    std::string value;
+    if( match_with_value( "--agents", value ) )
+    {
+      options.agents = parse_int( "--agents", value );
+    }
+    else if( match_with_value( "--solver", value ) )
+    {
+      options.solver = value;
+    }
+    else if( match_with_value( "--strategy", value ) )
+    {
+      options.strategy = value;
+    }
+    else if( match_with_value( "--max-outer", value ) )
+    {
+      options.max_outer = parse_int( "--max-outer", value );
+    }
+    else if( !arg.empty() && arg.front() != '-' && !positional_agents )
+    {
+      options.agents      = parse_int( "agents", arg );
+      positional_agents   = true;
+    }
+    else
+    {
+      throw std::invalid_argument( "Unknown argument '" + arg + "'" );
+    }
+  }
+  return options;
+}
+
+void
+print_usage()
+{
+  std::cout << "Usage: multi_agent_lqr [--agents N] [--solver NAME] [--strategy NAME] [--max-outer N]\n";
+  std::cout << "       multi_agent_lqr N\n";
+  std::cout << '\n';
+  examples::print_available( std::cout );
+}
+
+} // namespace
 
 /*────────────────────────────  main  ──────────────────────────────*/
 int
 main( int argc, char** argv )
 {
   using namespace mas;
-  const int        N   = ( argc > 1 ) ? std::stoi( argv[1] ) : 10;
-  constexpr int    n_x = 4, n_u = 4, T = 10;
-  constexpr double dt = 0.1;
-
-  MultiAgentProblem problem;
-  for( int i = 0; i < N; ++i )
+  try
   {
-    auto ocp = std::make_shared<OCP>( create_linear_lqr_ocp( n_x, n_u, dt, T ) );
-    problem.add_agent( std::make_shared<Agent>( i, ocp ) );
+    const Options options = parse_options( argc, argv );
+    if( options.show_help )
+    {
+      print_usage();
+      return 0;
+    }
+
+    constexpr int    n_x = 4, n_u = 4, T = 10;
+    constexpr double dt  = 0.1;
+
+    MultiAgentProblem problem;
+    for( int i = 0; i < options.agents; ++i )
+    {
+      auto ocp = std::make_shared<OCP>( create_linear_lqr_ocp( n_x, n_u, dt, T ) );
+      problem.add_agent( std::make_shared<Agent>( i, ocp ) );
+    }
+
+    SolverParams params{
+      { "max_iterations",  100 },
+      {      "tolerance", 1e-5 },
+      {         "max_ms",  100 }
+    };
+
+    auto      solver          = examples::make_solver( options.solver );
+    Strategy  strategy        = examples::make_strategy( options.strategy, std::move( solver ), params, options.max_outer );
+    const auto start          = std::chrono::steady_clock::now();
+    const auto solution       = mas::solve( strategy, problem );
+    const auto end            = std::chrono::steady_clock::now();
+    const double elapsed_ms   = std::chrono::duration<double, std::milli>( end - start ).count();
+    const std::string solver_name   = examples::canonical_solver_name( options.solver );
+    const std::string strategy_name = examples::canonical_strategy_name( options.strategy );
+
+    std::cout << std::fixed << std::setprecision( 6 )
+              << "solver=" << solver_name
+              << " strategy=" << strategy_name
+              << " agents=" << options.agents
+              << " cost=" << solution.total_cost
+              << " time_ms=" << elapsed_ms
+              << '\n';
   }
-
-  SolverParams p{
-    { "max_iterations",  100 },
-    {      "tolerance", 1e-5 },
-    {         "max_ms",  100 }
-  };
-  constexpr int max_outer = 10;
-
-  std::vector<Result> results;
-  auto                time_solver = [&]( const std::string& name, auto&& call ) {
-    for( auto& a : problem.agents )
-      a->reset();
-    auto                                      start   = std::chrono::high_resolution_clock::now();
-    auto                                      sol     = call();
-    auto                                      end     = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> elapsed = end - start;
-    results.push_back( { name, sol.total_cost, elapsed.count() } );
-  };
-
-  time_solver( "Centralized iLQR", [&]() {
-    Solver solver{ std::in_place_type<iLQR> };
-    set_params( solver, p );
-    Strategy strat = CentralizedStrategy{ std::move( solver ) };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Centralized CGD", [&]() {
-    Solver solver{ std::in_place_type<CGD> };
-    set_params( solver, p );
-    Strategy strat = CentralizedStrategy{ std::move( solver ) };
-    return mas::solve( strat, problem );
-  } );
-#ifdef MAS_HAVE_OSQP
-  time_solver( "Centralized OSQP", [&]() {
-    Solver solver{ std::in_place_type<OSQP> };
-    set_params( solver, p );
-    Strategy strat = CentralizedStrategy{ std::move( solver ) };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Centralized OSQP-collocation", [&]() {
-    Solver solver{ std::in_place_type<OSQPCollocation> };
-    set_params( solver, p );
-    Strategy strat = CentralizedStrategy{ std::move( solver ) };
-    return mas::solve( strat, problem );
-  } );
-#endif
-
-  time_solver( "Nash Sequential iLQR", [&]() {
-    Solver   solver{ std::in_place_type<iLQR> };
-    Strategy strat = SequentialNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Nash Sequential CGD", [&]() {
-    Solver   solver{ std::in_place_type<CGD> };
-    Strategy strat = SequentialNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-#ifdef MAS_HAVE_OSQP
-  time_solver( "Nash Sequential OSQP", [&]() {
-    Solver   solver{ std::in_place_type<OSQP> };
-    Strategy strat = SequentialNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Nash Sequential OSQP-collocation", [&]() {
-    Solver   solver{ std::in_place_type<OSQPCollocation> };
-    Strategy strat = SequentialNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-#endif
-
-  time_solver( "Nash LineSearch iLQR", [&]() {
-    Solver   solver{ std::in_place_type<iLQR> };
-    Strategy strat = LineSearchNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Nash LineSearch CGD", [&]() {
-    Solver   solver{ std::in_place_type<CGD> };
-    Strategy strat = LineSearchNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-#ifdef MAS_HAVE_OSQP
-  time_solver( "Nash LineSearch OSQP", [&]() {
-    Solver   solver{ std::in_place_type<OSQP> };
-    Strategy strat = LineSearchNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-  time_solver( "Nash LineSearch OSQP-collocation", [&]() {
-    Solver   solver{ std::in_place_type<OSQPCollocation> };
-    Strategy strat = LineSearchNashStrategy{ max_outer, std::move( solver ), p };
-    return mas::solve( strat, problem );
-  } );
-#endif
-
-  std::cout << std::fixed << std::setprecision( 6 ) << "\n";
-  std::cout << std::setw( 40 ) << std::left << "Method" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)" << "\n";
-  std::cout << std::string( 70, '-' ) << "\n";
-  for( const auto& r : results )
-    std::cout << std::setw( 40 ) << std::left << r.name << std::setw( 15 ) << r.cost << std::setw( 15 ) << r.time_ms << "\n";
+  catch( const std::exception& e )
+  {
+    std::cerr << "Error: " << e.what() << "\n";
+    std::cerr << "Use --help to see available options.\n";
+    return 1;
+  }
+  return 0;
 }

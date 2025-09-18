@@ -5,6 +5,7 @@
 
 #include "multi_agent_solver/solvers/cgd.hpp"
 #include "multi_agent_solver/solvers/ilqr.hpp"
+#include "multi_agent_solver/solvers/multi_shooting_ilqr.hpp"
 #ifdef MAS_HAVE_OSQP
   #include "multi_agent_solver/solvers/osqp.hpp"
   #include "multi_agent_solver/solvers/osqp_collocation.hpp"
@@ -15,10 +16,10 @@ namespace mas
 
 // Holds any of the concrete solver objects.
 #ifndef MAS_HAVE_OSQP
-using Solver = std::variant<iLQR, CGD>;
+using Solver = std::variant<iLQR, MultiShootILQR, CGD>;
 #endif
 #ifdef MAS_HAVE_OSQP
-using Solver = std::variant<iLQR, CGD, OSQP, OSQPCollocation>;
+using Solver = std::variant<iLQR, MultiShootILQR, CGD, OSQP, OSQPCollocation>;
 #endif
 
 /**

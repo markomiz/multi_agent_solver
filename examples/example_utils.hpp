@@ -33,6 +33,9 @@ canonical_solver_name( const std::string& name )
   const std::string key = normalize_key( name );
   if( key == "ilqr" )
     return "ilqr";
+  if( key == "multishootingilqr" || key == "multishootilqr" || key == "msilqr"
+      || key == "multi_shoot_ilqr" || key == "multi_shooting_ilqr" )
+    return "multi_shoot_ilqr";
   if( key == "primaldualilqr" || key == "pdilqr" || key == "primal_dual_ilqr" )
     return "ilqr";
   if( key == "cgd" )
@@ -64,7 +67,7 @@ canonical_strategy_name( const std::string& name )
 inline std::vector<std::string>
 available_solver_names()
 {
-  std::vector<std::string> names{ "ilqr", "cgd" };
+  std::vector<std::string> names{ "ilqr", "multi_shoot_ilqr", "cgd" };
 #ifdef MAS_HAVE_OSQP
   names.push_back( "osqp" );
   names.push_back( "osqp_collocation" );
@@ -78,6 +81,8 @@ make_solver( const std::string& name )
   const std::string canonical = canonical_solver_name( name );
   if( canonical == "ilqr" )
     return mas::Solver{ std::in_place_type<mas::iLQR> };
+  if( canonical == "multi_shoot_ilqr" )
+    return mas::Solver{ std::in_place_type<mas::MultiShootILQR> };
   if( canonical == "cgd" )
     return mas::Solver{ std::in_place_type<mas::CGD> };
 #ifdef MAS_HAVE_OSQP

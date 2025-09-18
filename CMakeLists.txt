@@ -13,9 +13,14 @@ find_package(OpenMP REQUIRED)
 # Optional OSQP dependencies
 find_package(osqp QUIET)
 find_package(OsqpEigen QUIET)
+find_package(OpenMP REQUIRED)
 
 # Interface library
 add_library(MultiAgentSolver INTERFACE)
+
+
+target_compile_options(MultiAgentSolver INTERFACE ${OpenMP_CXX_FLAGS})
+target_link_libraries(MultiAgentSolver  INTERFACE ${OSQP_LIBRARIES} ${OpenMP_CXX_LIBRARIES})
 
 target_include_directories(MultiAgentSolver INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

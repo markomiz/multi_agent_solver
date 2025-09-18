@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -223,26 +222,35 @@ def _prepare_solution_agents(data: Dict[str, Any]) -> Dict[Any, Dict[str, Any]]:
 
 def plot_example_solutions(
     example: str,
-    strategy: Optional[str],
-    solutions: List[Tuple[str, Dict[str, Any]]],
+    solutions: List[Tuple[str, Optional[str], Dict[str, Any]]],
     plot_dir: Path,
 ) -> None:
     prepared: List[Tuple[str, Dict[Any, Dict[str, Any]]]] = []
     agent_order: List[Any] = []
 
-    for solver, data in solutions:
+    for solver, strategy, data in solutions:
         agent_map = _prepare_solution_agents(data)
         if not agent_map:
             continue
-        prepared.append((solver, agent_map))
+        label_parts = [solver]
+        if strategy:
+            label_parts.append(strategy)
+        prepared.append((" / ".join(label_parts), agent_map))
         for identifier in agent_map.keys():
             if identifier not in agent_order:
                 agent_order.append(identifier)
 
     if not prepared or not agent_order:
+        strategy_names = sorted(
+            {
+                strategy
+                for _, strategy, _ in solutions
+                if strategy is not None
+            }
+        )
+        detail = f" ({', '.join(strategy_names)})" if strategy_names else ""
         sys.stderr.write(
-            f"Warning: no valid state data found for example '{example}'"
-            f"{' strategy ' + strategy if strategy else ''}.\n"
+            f"Warning: no valid state data found for example '{example}'{detail}.\n"
         )
         return
 
@@ -260,7 +268,7 @@ def plot_example_solutions(
         figsize=(fig_width, fig_height),
     )
 
-    for col, (solver, agent_map) in enumerate(prepared):
+    for col, (label, agent_map) in enumerate(prepared):
         for row, agent_id in enumerate(agent_order):
             ax = axes[row][col]
             agent = agent_map.get(agent_id)
@@ -279,10 +287,7 @@ def plot_example_solutions(
                 ax.plot(times[: len(series)], series, label=f"x{dim}")
 
             if row == 0:
-                title_parts = [solver]
-                if strategy:
-                    title_parts.append(strategy)
-                ax.set_title(" / ".join(title_parts))
+                ax.set_title(label)
                 if dims > 1:
                     ax.legend(loc="upper right", fontsize="small")
             if row == n_agents - 1:
@@ -291,15 +296,10 @@ def plot_example_solutions(
                 ax.set_ylabel(f"agent {agent_id}")
 
     sup_title = f"{example} state trajectories"
-    if strategy:
-        sup_title += f" ({strategy})"
     fig.suptitle(sup_title)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
 
-    filename_parts = [example]
-    if strategy:
-        filename_parts.append(strategy)
-    filename_parts.append("states")
+    filename_parts = [example, "states"]
     filename = "_".join(sanitize_name(part) for part in filename_parts) + ".png"
     save_path = plot_dir / filename
     fig.savefig(save_path)
@@ -370,11 +370,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         plot_dir = (args.plot_dir or Path("plots")).resolve()
         plot_dir.mkdir(parents=True, exist_ok=True)
 
-    results: Dict[str, List[Dict[str, str]]] = {
-        example: [] for example in args.examples}
-    plot_requests: Dict[
-        str, Dict[Optional[str], List[Tuple[str, Dict[str, Any]]]]
-    ] = {example: defaultdict(list) for example in args.examples}
+    results: Dict[str, List[Dict[str, str]]] = {example: [] for example in args.examples}
+    plot_requests: Dict[str, List[Tuple[str, Optional[str], Dict[str, Any]]]] = {
+        example: [] for example in args.examples
+    }
 
     for example in args.examples:
         executable = build_dir / example
@@ -430,8 +429,8 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         if dump_path.exists():
                             dump_path.unlink()
                         if solution_data and plot_dir is not None:
-                            plot_requests[example][strategy].append(
-                                (solver, solution_data)
+                            plot_requests[example].append(
+                                (solver, strategy, solution_data)
                             )
         else:
             for solver in args.solvers:
@@ -472,13 +471,12 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     if dump_path.exists():
                         dump_path.unlink()
                     if solution_data and plot_dir is not None:
-                        plot_requests[example][None].append((solver, solution_data))
+                        plot_requests[example].append((solver, None, solution_data))
 
     if args.plot_states and plot_dir is not None:
-        for example, strategy_map in plot_requests.items():
-            for strategy, solutions in strategy_map.items():
-                if solutions:
-                    plot_example_solutions(example, strategy, solutions, plot_dir)
+        for example, solutions in plot_requests.items():
+            if solutions:
+                plot_example_solutions(example, solutions, plot_dir)
 
     for example in args.examples:
         rows = results.get(example, [])

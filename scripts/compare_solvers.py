@@ -255,45 +255,106 @@ def plot_example_solutions(
         return
 
     n_agents = len(agent_order)
-    n_solutions = len(prepared)
+
+    # Determine the dimensionality for each agent so we can create one column per
+    # state component and hide unused subplots when some solutions omit an agent.
+    agent_dims: Dict[Any, int] = {}
+    for agent_id in agent_order:
+        for _, agent_map in prepared:
+            states = agent_map.get(agent_id, {}).get("states", [])
+            if states and isinstance(states[0], list):
+                agent_dims[agent_id] = len(states[0])
+                break
+        else:
+            agent_dims[agent_id] = 0
+
+    max_dims = max(agent_dims.values(), default=0)
+    if max_dims == 0:
+        sys.stderr.write(
+            f"Warning: unable to determine state dimensionality for example '{example}'.\n"
+        )
+        return
 
     plt = get_pyplot()
-    fig_width = max(4.0, 4.0 * n_solutions)
+    fig_width = max(4.0, 3.5 * max_dims)
     fig_height = max(2.5, 2.5 * n_agents)
     fig, axes = plt.subplots(
         n_agents,
-        n_solutions,
+        max_dims,
         squeeze=False,
-        sharex="col",
+        sharex=True,
         figsize=(fig_width, fig_height),
     )
 
-    for col, (label, agent_map) in enumerate(prepared):
-        for row, agent_id in enumerate(agent_order):
-            ax = axes[row][col]
-            agent = agent_map.get(agent_id)
-            if agent is None:
-                ax.set_visible(False)
-                continue
+    # Create combined colour and linestyle styles so each solution is visually distinct.
+    color_cycle = plt.rcParams.get("axes.prop_cycle")
+    if color_cycle is not None:
+        colors = color_cycle.by_key().get("color", ["C0", "C1", "C2", "C3"])
+    else:
+        colors = ["C0", "C1", "C2", "C3"]
+    line_styles = ["-", "--", "-.", ":"]
+    style_pairs = []
+    for color in colors:
+        for linestyle in line_styles:
+            style_pairs.append((color, linestyle))
+    if not style_pairs:
+        style_pairs = [("C0", "-")]
 
-            states = agent.get("states", [])
-            dt = float(agent.get("dt", 1.0))
-            times = [idx * dt for idx in range(len(states))]
-            dims = len(states[0]) if states and isinstance(states[0], list) else 0
-            for dim in range(dims):
+    legend_handles: List[Any] = []
+
+    for sol_idx, (label, agent_map) in enumerate(prepared):
+        color, linestyle = style_pairs[sol_idx % len(style_pairs)]
+
+        for row, agent_id in enumerate(agent_order):
+            dims = agent_dims.get(agent_id, 0)
+            for dim in range(max_dims):
+                ax = axes[row][dim]
+                if dim >= dims:
+                    ax.set_visible(False)
+                    continue
+
+                agent = agent_map.get(agent_id)
+                if agent is None:
+                    continue
+
+                states = agent.get("states", [])
+                if not states or not isinstance(states[0], list) or len(states[0]) <= dim:
+                    continue
+
+                dt = float(agent.get("dt", 1.0))
+                times = [idx * dt for idx in range(len(states))]
                 series = [step[dim] for step in states if len(step) > dim]
                 if not series:
                     continue
-                ax.plot(times[: len(series)], series, label=f"x{dim}")
 
-            if row == 0:
-                ax.set_title(label)
-                if dims > 1:
-                    ax.legend(loc="upper right", fontsize="small")
-            if row == n_agents - 1:
-                ax.set_xlabel("time [s]")
-            if col == 0:
-                ax.set_ylabel(f"agent {agent_id}")
+                if row == 0 and dim == 0:
+                    line, = ax.plot(
+                        times[: len(series)],
+                        series,
+                        label=label,
+                        color=color,
+                        linestyle=linestyle,
+                    )
+                    legend_handles.append(line)
+                else:
+                    ax.plot(
+                        times[: len(series)],
+                        series,
+                        label=None,
+                        color=color,
+                        linestyle=linestyle,
+                    )
+
+                if row == n_agents - 1:
+                    ax.set_xlabel("time [s]")
+                if dim == 0:
+                    ax.set_ylabel(f"agent {agent_id}")
+                if row == 0:
+                    ax.set_title(f"x{dim}")
+
+    if legend_handles:
+        labels = [line.get_label() for line in legend_handles]
+        fig.legend(legend_handles, labels, loc="upper right", bbox_to_anchor=(0.98, 0.98))
 
     sup_title = f"{example} state trajectories"
     fig.suptitle(sup_title)

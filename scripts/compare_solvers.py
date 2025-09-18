@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Utility to benchmark example executables across solver and strategy choices."""
-
 from __future__ import annotations
 
 import argparse
@@ -9,6 +8,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 MULTI_AGENT_EXAMPLES = {
     "multi_agent_lqr",
@@ -34,8 +36,21 @@ def parse_arguments(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--build-dir",
         type=Path,
-        default=Path("build/relwithdebinfo"),
+        default=None,
         help="Path to the CMake build directory that contains the example executables.",
+    )
+    parser.add_argument(
+        "--build-type",
+        default="RelWithDebInfo",
+        help=(
+            "CMake build type to pass to scripts/build.sh when building automatically "
+            "(ignored if --build-dir is supplied)."
+        ),
+    )
+    parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="Do not invoke scripts/build.sh before running the comparisons.",
     )
     parser.add_argument(
         "--examples",
@@ -120,6 +135,31 @@ def parse_result_line(line: str) -> Dict[str, str]:
     return data
 
 
+def canonical_build_type(value: str) -> str:
+    mapping = {
+        "debug": "Debug",
+        "release": "Release",
+        "relwithdebinfo": "RelWithDebInfo",
+        "minsizerel": "MinSizeRel",
+    }
+    key = value.strip().lower()
+    return mapping.get(key, value)
+
+
+def ensure_build(build_type: str, verbose: bool) -> None:
+    build_script = REPO_ROOT / "scripts" / "build.sh"
+    if not build_script.exists():
+        raise FileNotFoundError(f"Build script '{build_script}' not found.")
+    cmd = [str(build_script), build_type]
+    if verbose:
+        print("$", " ".join(cmd))
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), check=False)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Build failed with exit code {result.returncode}. Run '{' '.join(cmd)}' manually for details."
+        )
+
+
 def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
     if not rows:
         return "(no successful runs)"
@@ -162,7 +202,19 @@ def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_arguments(argv)
-    build_dir = args.build_dir
+    build_type = canonical_build_type(args.build_type)
+
+    if not args.skip_build and args.build_dir is None:
+        try:
+            ensure_build(build_type, args.verbose)
+        except (FileNotFoundError, RuntimeError) as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+
+    if args.build_dir is not None:
+        build_dir = args.build_dir.resolve()
+    else:
+        build_dir = (REPO_ROOT / "build" / build_type.lower()).resolve()
 
     results: Dict[str, List[Dict[str, str]]] = {example: [] for example in args.examples}
 
@@ -175,7 +227,13 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         if example in MULTI_AGENT_EXAMPLES:
             for solver in args.solvers:
                 for strategy in args.strategies:
-                    cmd = [str(executable), f"--solver={solver}", f"--strategy={strategy}", f"--agents={args.agents}", f"--max-outer={args.max_outer}"]
+                    cmd = [
+                        str(executable),
+                        f"--solver={solver}",
+                        f"--strategy={strategy}",
+                        f"--agents={args.agents}",
+                        f"--max-outer={args.max_outer}",
+                    ]
                     result = run_command(cmd, args.timeout, args.verbose)
                     if result.returncode != 0:
                         sys.stderr.write(

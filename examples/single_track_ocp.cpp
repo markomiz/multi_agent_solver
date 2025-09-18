@@ -1,13 +1,15 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
-#include <map>
+#include <stdexcept>
 #include <string>
 
 #include "models/single_track_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
+
+#include "example_utils.hpp"
 
 mas::OCP
 create_single_track_lane_following_ocp()
@@ -113,60 +115,108 @@ create_single_track_lane_following_ocp()
   return problem;
 }
 
+struct Options
+{
+  bool        show_help = false;
+  std::string solver    = "ilqr";
+};
+
+namespace
+{
+
+Options
+parse_options( int argc, char** argv )
+{
+  Options options;
+  for( int i = 1; i < argc; ++i )
+  {
+    std::string arg = argv[i];
+    auto        match_with_value = [&]( const std::string& name, std::string& out ) {
+      const std::string prefix = name + "=";
+      if( arg == name )
+      {
+        if( i + 1 >= argc )
+          throw std::invalid_argument( "Missing value for option '" + name + "'" );
+        out = argv[++i];
+        return true;
+      }
+      if( arg.rfind( prefix, 0 ) == 0 )
+      {
+        out = arg.substr( prefix.size() );
+        return true;
+      }
+      return false;
+    };
+
+    if( arg == "--help" || arg == "-h" )
+    {
+      options.show_help = true;
+      continue;
+    }
+
+    std::string value;
+    if( match_with_value( "--solver", value ) )
+    {
+      options.solver = value;
+    }
+    else
+    {
+      throw std::invalid_argument( "Unknown argument '" + arg + "'" );
+    }
+  }
+  return options;
+}
+
+void
+print_usage()
+{
+  std::cout << "Usage: single_track_ocp [--solver NAME]\n";
+  std::cout << '\n';
+  examples::print_available( std::cout );
+}
+
+} // namespace
+
 int
-main( int /*argc*/, char** /*argv*/ )
+main( int argc, char** argv )
 {
   using namespace mas;
-
-  // Build the lane-following OCP
-  OCP problem = create_single_track_lane_following_ocp();
-
-  SolverParams params;
-  params["max_iterations"] = 10;
-  params["tolerance"]      = 1e-5;
-  params["max_ms"]         = 100;
-  // params["debug"]       = 1.0;   // uncomment for verbose output
-
-  /*----------------  instantiate concrete solvers  ---------------*/
-  std::map<std::string, Solver> solvers;
-  solvers.emplace( "iLQR", iLQR() );
-  solvers.emplace( "CGD", CGD() );
-#ifdef MAS_HAVE_OSQP
-  solvers.emplace( "OSQP", OSQP() );
-  solvers.emplace( "OSQP Collocation", OSQPCollocation() );
-#endif
-
-  struct SolverResult
+  try
   {
-    double cost;
-    double time_ms;
-  };
+    const Options options = parse_options( argc, argv );
+    if( options.show_help )
+    {
+      print_usage();
+      return 0;
+    }
 
-  std::map<std::string, SolverResult> results;
+    OCP problem = create_single_track_lane_following_ocp();
 
-  /*---------------------  run each solver  ------------------------*/
-  for( auto& [name, solver] : solvers )
-  {
-    auto problem_copy = problem; // Copy the problem for each solver to avoid state pollution
-    auto start        = std::chrono::high_resolution_clock::now();
+    SolverParams params;
+    params["max_iterations"] = 10;
+    params["tolerance"]      = 1e-5;
+    params["max_ms"]         = 100;
+
+    auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );
-    mas::solve( solver, problem_copy );
-    auto end      = std::chrono::high_resolution_clock::now();
-    results[name] = { problem_copy.best_cost, std::chrono::duration<double, std::milli>( end - start ).count() };
+
+    const auto start        = std::chrono::steady_clock::now();
+    mas::solve( solver, problem );
+    const auto end          = std::chrono::steady_clock::now();
+    const double elapsed_ms = std::chrono::duration<double, std::milli>( end - start ).count();
+
+    const std::string solver_name = examples::canonical_solver_name( options.solver );
+    std::cout << std::fixed << std::setprecision( 6 )
+              << "solver=" << solver_name
+              << " cost=" << problem.best_cost
+              << " time_ms=" << elapsed_ms
+              << '\n';
   }
-
-  /*---------------------  pretty print  ---------------------------*/
-  auto [min_cost, max_cost] = std::minmax_element( results.begin(), results.end(),
-                                                   []( const auto& a, const auto& b ) { return a.second.cost < b.second.cost; } );
-
-  auto [min_time, max_time] = std::minmax_element( results.begin(), results.end(),
-                                                   []( const auto& a, const auto& b ) { return a.second.time_ms < b.second.time_ms; } );
-
-  std::cout << "\n🚗 Single-Track Lane Following Test 🚗\n"
-            << "---------------------------------------------\n"
-            << std::left << std::setw( 20 ) << "Solver" << std::setw( 15 ) << "Cost" << std::setw( 15 ) << "Time (ms)\n"
-            << "---------------------------------------------\n";
-
-  for( const auto& [name, res] : results )
-    std::cout << std::left << std::setw( 20 ) << name << std::setw( 15 ) << res.cost << std::setw( 15 ) << res.time_ms << '\n';
+  catch( const std::exception& e )
+  {
+    std::cerr << "Error: " << e.what() << "\n";
+    std::cerr << "Use --help to see available options.\n";
+    return 1;
+  }
+  return 0;
 }

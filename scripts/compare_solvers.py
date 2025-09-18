@@ -41,7 +41,7 @@ def parse_arguments(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--build-type",
-        default="RelWithDebInfo",
+        default="Release",
         help=(
             "CMake build type to pass to scripts/build.sh when building automatically "
             "(ignored if --build-dir is supplied)."
@@ -62,7 +62,7 @@ def parse_arguments(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--solvers",
         nargs="+",
-        default=["ilqr", "cgd"],
+        default=["ilqr", "cgd", "osqp", "osqpcollocation"],
         help="Solvers to test. Names are passed directly to the executables.",
     )
     parser.add_argument(
@@ -164,7 +164,7 @@ def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
     if not rows:
         return "(no successful runs)"
 
-    def fmt_float(value: str, precision: int = 6) -> str:
+    def fmt_float(value: str, precision: int = 2) -> str:
         try:
             return f"{float(value):.{precision}f}"
         except ValueError:
@@ -179,7 +179,7 @@ def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
     for row in rows:
         solver = row.get("solver", "")
         cost = fmt_float(row.get("cost", ""))
-        time_ms = fmt_float(row.get("time_ms", ""), precision=3)
+        time_ms = fmt_float(row.get("time_ms", ""))
         values = [solver]
         if include_strategy:
             values.append(row.get("strategy", ""))
@@ -192,11 +192,13 @@ def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
             widths[idx] = max(widths[idx], len(value))
 
     lines = [
-        " ".join(header.ljust(widths[idx]) for idx, header in enumerate(headers)),
-        "-" * (sum(widths) + len(widths) - 1),
+        "    ".join(header.ljust(widths[idx])
+                    for idx, header in enumerate(headers)),
+        "-" * (sum(widths) + (len(widths) * 4)),
     ]
     for row in display_rows:
-        lines.append(" ".join(value.ljust(widths[idx]) for idx, value in enumerate(row)))
+        lines.append("    ".join(value.ljust(widths[idx])
+                     for idx, value in enumerate(row)))
     return "\n".join(lines)
 
 
@@ -216,12 +218,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     else:
         build_dir = (REPO_ROOT / "build" / build_type.lower()).resolve()
 
-    results: Dict[str, List[Dict[str, str]]] = {example: [] for example in args.examples}
+    results: Dict[str, List[Dict[str, str]]] = {
+        example: [] for example in args.examples}
 
     for example in args.examples:
         executable = build_dir / example
         if not executable.exists():
-            sys.stderr.write(f"Warning: executable '{executable}' not found. Skipping {example}.\n")
+            sys.stderr.write(
+                f"Warning: executable '{executable}' not found. Skipping {example}.\n")
             continue
 
         if example in MULTI_AGENT_EXAMPLES:

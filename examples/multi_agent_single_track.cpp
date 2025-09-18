@@ -1,4 +1,6 @@
+#include <charconv>
 #include <chrono>
+#include <system_error>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -65,14 +67,13 @@ namespace
 int
 parse_int( const std::string& label, const std::string& value )
 {
-  try
-  {
-    return std::stoi( value );
-  }
-  catch( const std::exception& )
-  {
+  int result = 0;
+  const char* begin = value.data();
+  const char* end   = begin + value.size();
+  const auto   [ptr, ec] = std::from_chars( begin, end, result );
+  if( ec != std::errc() || ptr != end )
     throw std::invalid_argument( "Invalid value for " + label + ": '" + value + "'" );
-  }
+  return result;
 }
 
 Options

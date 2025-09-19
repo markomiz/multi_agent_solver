@@ -211,6 +211,9 @@ main( int argc, char** argv )
               << " cost=" << problem.best_cost
               << " time_ms=" << elapsed_ms
               << '\n';
+
+    examples::print_state_trajectory( std::cout, problem.best_states, problem.dt, "single_track" );
+    examples::print_control_trajectory( std::cout, problem.best_controls, problem.dt, "single_track" );
   }
   catch( const std::exception& e )
   {

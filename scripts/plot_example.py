@@ -7,10 +7,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
-
-import matplotlib.pyplot as plt
-import numpy as np
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -185,11 +182,8 @@ def plot_trajectories(
     trajectories: Dict[str, Dict[str, Trajectory]],
     output_dir: Optional[Path],
     show: bool,
+    plt: Any,
 ) -> None:
-    if not trajectories:
-        print("No trajectory data found in example output.")
-        return
-
     for label in sorted(trajectories):
         sections = []
         data = trajectories[label]
@@ -206,7 +200,10 @@ def plot_trajectories(
             sharex=True,
             figsize=(10, 4 * len(sections)),
         )
-        axes_array = np.atleast_1d(axes).ravel()
+        try:
+            axes_array = list(axes)
+        except TypeError:
+            axes_array = [axes]
 
         for ax, (kind, traj) in zip(axes_array, sections):
             for name, values in traj.series.items():
@@ -228,6 +225,21 @@ def plot_trajectories(
         plt.show()
     else:
         plt.close("all")
+
+
+def load_pyplot(show: bool):
+    import matplotlib
+
+    if not show:
+        matplotlib.use("Agg")
+
+    try:
+        import matplotlib.pyplot as plt  # type: ignore
+    except Exception as exc:  # pragma: no cover - import error surface to user
+        message = "Failed to import matplotlib.pyplot. Install a GUI backend or run with --no-show."
+        raise RuntimeError(message) from exc
+
+    return plt
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
@@ -270,9 +282,18 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         sys.stderr.write(f"Error parsing example output: {exc}\n")
         return 1
 
+    if not trajectories:
+        print("No trajectory data found in example output.")
+        return 0
+
     output_dir = ensure_output_dir(args.output_dir)
     show = not args.no_show
-    plot_trajectories(trajectories, output_dir, show)
+    try:
+        plt = load_pyplot(show)
+    except RuntimeError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    plot_trajectories(trajectories, output_dir, show, plt)
     return 0
 
 

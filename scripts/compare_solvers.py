@@ -19,6 +19,7 @@ MULTI_AGENT_EXAMPLES = {
 SINGLE_AGENT_EXAMPLES = {
     "single_track_ocp",
     "pendulum_swing_up",
+    "rocket_max_altitude",
 }
 
 ALL_EXAMPLES = tuple(sorted(MULTI_AGENT_EXAMPLES | SINGLE_AGENT_EXAMPLES))

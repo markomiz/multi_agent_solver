@@ -29,17 +29,16 @@ create_pendulum_swingup_ocp()
 
   const double theta_goal = M_PI;
   const double w_theta    = 10.0;
-  const double w_omega    = 1.0;
+  const double w_omega    = 10.0;
   const double w_torque   = 0.01;
-  const double torque_max = 3.0;
+  const double torque_max = 5.0;
 
-  // problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
-  //   double theta = x( 0 );
-  //   double omega = x( 1 );
-  //   double tau   = u( 0 );
-  //   return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) * t_idx /
-  //   100.0;
-  // };
+  problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
+    double theta = x( 0 );
+    double omega = x( 1 );
+    double tau   = u( 0 );
+    return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) / 100.0;
+  };
 
   problem.terminal_cost = [=]( const State& x ) {
     double theta = x( 0 );
@@ -47,36 +46,36 @@ create_pendulum_swingup_ocp()
     return w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 );
   };
 
-  problem.cost_state_gradient = [=]( const StageCostFunction&, const State& x, const Control&, size_t ) {
-    Eigen::Vector2d grad;
-    grad( 0 ) = 2.0 * w_theta * ( x( 0 ) - theta_goal );
-    grad( 1 ) = 2.0 * w_omega * x( 1 );
-    return grad;
-  };
+  // problem.cost_state_gradient = [=]( const StageCostFunction&, const State& x, const Control&, size_t ) {
+  //   Eigen::Vector2d grad;
+  //   grad( 0 ) = 2.0 * w_theta * ( x( 0 ) - theta_goal );
+  //   grad( 1 ) = 2.0 * w_omega * x( 1 );
+  //   return grad;
+  // };
 
-  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& u, size_t ) {
-    Eigen::VectorXd grad = Eigen::VectorXd::Zero( 1 );
-    grad( 0 )            = 2.0 * w_torque * u( 0 );
-    return grad;
-  };
+  // problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& u, size_t ) {
+  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( 1 );
+  //   grad( 0 )            = 2.0 * w_torque * u( 0 );
+  //   return grad;
+  // };
 
-  problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
-    H( 0, 0 )         = 2.0 * w_theta;
-    H( 1, 1 )         = 2.0 * w_omega;
-    return H;
-  };
+  // problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
+  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
+  //   H( 0, 0 )         = 2.0 * w_theta;
+  //   H( 1, 1 )         = 2.0 * w_omega;
+  //   return H;
+  // };
 
-  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-    Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 1, 1 );
-    H( 0, 0 )         = 2.0 * w_torque;
-    return H;
-  };
+  // problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
+  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 1, 1 );
+  //   H( 0, 0 )         = 2.0 * w_torque;
+  //   return H;
+  // };
 
-  problem.dynamics_state_jacobian = []( const MotionModel&, const State& x, const Control& u ) { return pendulum_state_jacobian( x, u ); };
-  problem.dynamics_control_jacobian = []( const MotionModel&, const State& x, const Control& u ) {
-    return pendulum_control_jacobian( x, u );
-  };
+  // problem.dynamics_state_jacobian = []( const MotionModel&, const State& x, const Control& u ) { return pendulum_state_jacobian( x, u );
+  // }; problem.dynamics_control_jacobian = []( const MotionModel&, const State& x, const Control& u ) {
+  //   return pendulum_control_jacobian( x, u );
+  // };
 
   Eigen::VectorXd lower( 1 ), upper( 1 );
   lower << -torque_max;

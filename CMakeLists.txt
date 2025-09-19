@@ -18,6 +18,13 @@ find_package(OpenMP REQUIRED)
 # Interface library
 add_library(MultiAgentSolver INTERFACE)
 
+# Better stacks & symbols for perf in RelWithDebInfo
+target_compile_options(MultiAgentSolver INTERFACE
+  $<$<CONFIG:RelWithDebInfo>:-g -fno-omit-frame-pointer -fno-optimize-sibling-calls>
+)
+target_link_options(MultiAgentSolver INTERFACE
+  $<$<CONFIG:RelWithDebInfo>:-Wl,--build-id>
+)
 
 target_compile_options(MultiAgentSolver INTERFACE ${OpenMP_CXX_FLAGS})
 target_link_libraries(MultiAgentSolver  INTERFACE ${OSQP_LIBRARIES} ${OpenMP_CXX_LIBRARIES})

@@ -1,22 +1,22 @@
+#include <cmath>
+
 #include <algorithm>
 #include <charconv>
 #include <chrono>
-#include <system_error>
-#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
+#include "example_utils.hpp"
 #include "models/single_track_model.hpp"
 #include "multi_agent_solver/agent.hpp"
 #include "multi_agent_solver/multi_agent_problem.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/strategies/strategy.hpp"
-
-#include "example_utils.hpp"
 
 mas::OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int time_steps )
@@ -31,7 +31,7 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   double x0             = track_radius * cos( initial_theta );
   double y0             = track_radius * sin( initial_theta );
   problem.initial_state = Eigen::VectorXd::Zero( problem.state_dim );
-  problem.initial_state << x0, y0, 1.57 + initial_theta, 0.0;
+  problem.initial_state << x0, y0, 1.57 + initial_theta, 4.0;
 
   problem.dynamics = single_track_model;
 
@@ -55,11 +55,11 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
 
 struct Options
 {
-  bool        show_help   = false;
-  int         agents      = 10;
-  int         max_outer   = 10;
-  std::string solver      = "ilqr";
-  std::string strategy    = "centralized";
+  bool        show_help = false;
+  int         agents    = 10;
+  int         max_outer = 10;
+  std::string solver    = "ilqr";
+  std::string strategy  = "centralized";
 };
 
 namespace
@@ -68,10 +68,10 @@ namespace
 int
 parse_int( const std::string& label, const std::string& value )
 {
-  int result = 0;
-  const char* begin = value.data();
-  const char* end   = begin + value.size();
-  const auto   [ptr, ec] = std::from_chars( begin, end, result );
+  int         result   = 0;
+  const char* begin    = value.data();
+  const char* end      = begin + value.size();
+  const auto [ptr, ec] = std::from_chars( begin, end, result );
   if( ec != std::errc() || ptr != end )
     throw std::invalid_argument( "Invalid value for " + label + ": '" + value + "'" );
   return result;
@@ -91,7 +91,7 @@ parse_options( int argc, char** argv )
       const auto end    = eq_pos == std::string::npos ? arg.size() : eq_pos;
       std::replace( arg.begin() + 2, arg.begin() + static_cast<std::ptrdiff_t>( end ), '_', '-' );
     }
-    auto        match_with_value = [&]( const std::string& name, std::string& out ) {
+    auto match_with_value = [&]( const std::string& name, std::string& out ) {
       const std::string prefix = name + "=";
       if( arg == name )
       {
@@ -175,7 +175,7 @@ main( int argc, char** argv )
     };
     constexpr int    time_steps      = 10;
     constexpr double track_radius    = 20.0;
-    constexpr double target_velocity = 10.0;
+    constexpr double target_velocity = 5.0;
 
     MultiAgentProblem problem;
     for( int i = 0; i < options.agents; ++i )
@@ -185,22 +185,17 @@ main( int argc, char** argv )
       problem.add_agent( std::make_shared<Agent>( i, ocp ) );
     }
 
-    auto      solver          = examples::make_solver( options.solver );
-    Strategy  strategy        = examples::make_strategy( options.strategy, std::move( solver ), params, options.max_outer );
-    const auto start          = std::chrono::steady_clock::now();
-    const auto solution       = mas::solve( strategy, problem );
-    const auto end            = std::chrono::steady_clock::now();
-    const double elapsed_ms   = std::chrono::duration<double, std::milli>( end - start ).count();
+    auto              solver        = examples::make_solver( options.solver );
+    Strategy          strategy      = examples::make_strategy( options.strategy, std::move( solver ), params, options.max_outer );
+    const auto        start         = std::chrono::steady_clock::now();
+    const auto        solution      = mas::solve( strategy, problem );
+    const auto        end           = std::chrono::steady_clock::now();
+    const double      elapsed_ms    = std::chrono::duration<double, std::milli>( end - start ).count();
     const std::string solver_name   = examples::canonical_solver_name( options.solver );
     const std::string strategy_name = examples::canonical_strategy_name( options.strategy );
 
-    std::cout << std::fixed << std::setprecision( 6 )
-              << "solver=" << solver_name
-              << " strategy=" << strategy_name
-              << " agents=" << options.agents
-              << " cost=" << solution.total_cost
-              << " time_ms=" << elapsed_ms
-              << '\n';
+    std::cout << std::fixed << std::setprecision( 6 ) << "solver=" << solver_name << " strategy=" << strategy_name
+              << " agents=" << options.agents << " cost=" << solution.total_cost << " time_ms=" << elapsed_ms << '\n';
   }
   catch( const std::exception& e )
   {

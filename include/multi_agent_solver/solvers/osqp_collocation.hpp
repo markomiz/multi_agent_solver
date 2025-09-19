@@ -244,8 +244,12 @@ inline void
 OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const ControlTrajectory& U, double reg )
 {
   qp.g.setZero();
-  for( int t = 1; t <= T; ++t )
-    qp.g.segment( id_state( t, 0, nx ), nx ) = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( std::min( t, T - 1 ) ), t );
+  for( int t = 1; t < T; ++t )
+    qp.g.segment( id_state( t, 0, nx ), nx ) = p.cost_state_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
+
+  if( T > 0 )
+    qp.g.segment( id_state( T, 0, nx ), nx ) = p.terminal_cost_gradient( p.terminal_cost, X.col( T ) );
+
   for( int t = 0; t < T; ++t )
     qp.g.segment( id_control( t, nx, nu, T ), nu ) = p.cost_control_gradient( p.stage_cost, X.col( t ), U.col( t ), t );
 
@@ -254,18 +258,44 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 
   constexpr double cache_eps = 1e-9;
 
-  for( int t = 1; t <= T; ++t )
+  for( int t = 1; t < T; ++t )
   {
     const auto x         = X.col( t );
-    const auto u         = U.col( std::min( t, T - 1 ) );
+    const auto u         = U.col( t );
     bool       recompute = !use_cache || !cache_valid || ( x - X_prev.col( t ) ).norm() > cache_eps
-                  || ( u - U_prev.col( std::min( t, T - 1 ) ) ).norm() > cache_eps;
+                  || ( u - U_prev.col( t ) ).norm() > cache_eps;
 
     if( recompute )
     {
       auto Q = p.cost_state_hessian( p.stage_cost, x, u, t );
       if( !Q.allFinite() )
         std::cerr << "[Warning] Non-finite Q at t=" << t << "\n";
+
+      double min_diag = Q.diagonal().minCoeff();
+      if( min_diag + reg < 0.0 )
+      {
+        double lambda         = std::abs( min_diag ) + reg;
+        Q.diagonal().array() += lambda;
+      }
+
+      Q_cache[t] = Q;
+    }
+
+    for( int i = 0; i < nx; ++i )
+      h_val[H_idx[kH++]] = Q_cache[t]( i, i );
+  }
+
+  if( T > 0 )
+  {
+    const int  t         = T;
+    const auto x         = X.col( t );
+    bool       recompute = !use_cache || !cache_valid || ( x - X_prev.col( t ) ).norm() > cache_eps;
+
+    if( recompute )
+    {
+      auto Q = p.terminal_cost_hessian( p.terminal_cost, x );
+      if( !Q.allFinite() )
+        std::cerr << "[Warning] Non-finite terminal Hessian\n";
 
       double min_diag = Q.diagonal().minCoeff();
       if( min_diag + reg < 0.0 )

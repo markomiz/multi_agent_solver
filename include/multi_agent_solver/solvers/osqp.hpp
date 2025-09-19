@@ -280,14 +280,22 @@ private:
     const int T  = p.horizon_steps;
 
 
-    for( int t = 0; t <= T; ++t )
+    for( int t = 0; t < T; ++t )
     {
-      const Eigen::MatrixXd Q = p.cost_state_hessian( p.stage_cost, x.col( t ), u.col( std::min( t, T - 1 ) ), t );
+      const Eigen::MatrixXd Q =
+        p.cost_state_hessian( p.stage_cost, x.col( t ), u.col( std::min( t, T - 1 ) ), t );
       for( int i = 0; i < nx; ++i )
       {
         const int idx = t * nx + i;
         tri.emplace_back( idx, idx, std::max( Q( i, i ) + reg, 1e-6 ) );
       }
+    }
+
+    const Eigen::MatrixXd Q_T = p.terminal_cost_hessian( p.terminal_cost, x.col( T ) );
+    for( int i = 0; i < nx; ++i )
+    {
+      const int idx = T * nx + i;
+      tri.emplace_back( idx, idx, std::max( Q_T( i, i ) + reg, 1e-6 ) );
     }
 
     for( int t = 0; t < T; ++t )
@@ -311,8 +319,11 @@ private:
     const int T  = p.horizon_steps;
 
     qp_data.gradient.setZero();
-    for( int t = 0; t <= T; ++t )
-      qp_data.gradient.segment( t * nx, nx ) = p.cost_state_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
+    for( int t = 0; t < T; ++t )
+      qp_data.gradient.segment( t * nx, nx ) =
+        p.cost_state_gradient( p.stage_cost, x.col( t ), u.col( t ), t );
+
+    qp_data.gradient.segment( T * nx, nx ) = p.terminal_cost_gradient( p.terminal_cost, x.col( T ) );
 
     for( int t = 0; t < T; ++t )
       qp_data.gradient.segment( ( T + 1 ) * nx + t * nu, nu ) = p.cost_control_gradient( p.stage_cost, x.col( t ), u.col( t ), t );

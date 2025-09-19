@@ -227,19 +227,35 @@ def plot_trajectories(
         plt.close("all")
 
 
-def load_pyplot(show: bool):
+def _has_display() -> bool:
+    from os import environ
+
+    return any(environ.get(var) for var in ("DISPLAY", "WAYLAND_DISPLAY", "MIR_SOCKET"))
+
+
+def load_pyplot(request_show: bool) -> Tuple[Any, bool]:
     import matplotlib
 
-    if not show:
+    show = request_show
+    if not request_show or not _has_display():
         matplotlib.use("Agg")
+        show = False
 
     try:
         import matplotlib.pyplot as plt  # type: ignore
+        return plt, show
+    except Exception:
+        if matplotlib.get_backend().lower() == "agg":
+            raise
+
+    matplotlib.use("Agg")
+    try:
+        import matplotlib.pyplot as plt  # type: ignore
     except Exception as exc:  # pragma: no cover - import error surface to user
-        message = "Failed to import matplotlib.pyplot. Install a GUI backend or run with --no-show."
+        message = "Failed to import matplotlib.pyplot even with the Agg backend."
         raise RuntimeError(message) from exc
 
-    return plt
+    return plt, False
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
@@ -289,7 +305,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     output_dir = ensure_output_dir(args.output_dir)
     show = not args.no_show
     try:
-        plt = load_pyplot(show)
+        plt, show = load_pyplot(show)
     except RuntimeError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1

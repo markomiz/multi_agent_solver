@@ -75,6 +75,8 @@ struct OCP
   CostStateHessian        cost_state_hessian;
   CostControlHessian      cost_control_hessian;
   CostCrossTerm           cost_cross_term;
+  TerminalCostGradient    terminal_cost_gradient;
+  TerminalCostHessian     terminal_cost_hessian;
 
   size_t id = 0;
 
@@ -126,6 +128,11 @@ struct OCP
       cost_control_hessian = compute_cost_control_hessian;
     if( !cost_cross_term )
       cost_cross_term = compute_cost_cross_term;
+
+    if( !terminal_cost_gradient )
+      terminal_cost_gradient = compute_terminal_cost_gradient;
+    if( !terminal_cost_hessian )
+      terminal_cost_hessian = compute_terminal_cost_hessian;
 
     if( equality_constraints )
     {

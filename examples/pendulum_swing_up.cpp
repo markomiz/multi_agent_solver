@@ -33,12 +33,13 @@ create_pendulum_swingup_ocp()
   const double w_torque   = 0.01;
   const double torque_max = 3.0;
 
-  problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    double tau   = u( 0 );
-    return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) * t_idx / 100.0;
-  };
+  // problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
+  //   double theta = x( 0 );
+  //   double omega = x( 1 );
+  //   double tau   = u( 0 );
+  //   return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) * t_idx /
+  //   100.0;
+  // };
 
   problem.terminal_cost = [=]( const State& x ) {
     double theta = x( 0 );

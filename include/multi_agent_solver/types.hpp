@@ -29,6 +29,7 @@ using StageCostFunction = std::function<double( const State&, const Control&, si
 using TerminalCostFunction = std::function<double( const State& )>;
 
 
+
 // Constraints
 using ConstraintViolations        = Eigen::VectorXd;
 using ConstraintsFunction         = std::function<ConstraintViolations( const State&, const Control& )>;
@@ -44,6 +45,8 @@ using CostControlGradient     = std::function<Eigen::VectorXd( const StageCostFu
 using CostStateHessian        = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
 using CostControlHessian      = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
 using CostCrossTerm           = std::function<Eigen::MatrixXd( const StageCostFunction&, const State&, const Control&, size_t )>;
+using TerminalCostGradient    = std::function<Eigen::VectorXd( const TerminalCostFunction&, const State& )>;
+using TerminalCostHessian     = std::function<Eigen::MatrixXd( const TerminalCostFunction&, const State& )>;
 using ControlGradient         = Eigen::MatrixXd;
 
 // GradientComputer interface

@@ -89,8 +89,17 @@ public:
         break;
       }
 
-      v_x.setZero();
-      v_xx.setZero();
+      if( problem.terminal_cost_gradient )
+        v_x = problem.terminal_cost_gradient( problem.terminal_cost, x.col( T ) );
+      else
+        v_x.setZero();
+
+      if( problem.terminal_cost_hessian )
+        v_xx = problem.terminal_cost_hessian( problem.terminal_cost, x.col( T ) );
+      else
+        v_xx.setZero();
+
+      v_xx = 0.5 * ( v_xx + v_xx.transpose() );
 
       for( int t = T - 1; t >= 0; --t )
       {

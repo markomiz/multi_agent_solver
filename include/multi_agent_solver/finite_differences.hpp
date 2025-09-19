@@ -99,6 +99,13 @@ safe_eval( const StageCostFunction& stage_cost, const State& x, const Control& u
   return std::isfinite( value ) ? value : 0.0;
 }
 
+inline double
+safe_eval_terminal( const TerminalCostFunction& terminal_cost, const State& x )
+{
+  double value = terminal_cost( x );
+  return std::isfinite( value ) ? value : 0.0;
+}
+
 // Cost derivatives
 inline Eigen::VectorXd
 compute_cost_state_gradient( const StageCostFunction& stage_cost, const State& x, const Control& u, size_t time_idx )
@@ -195,6 +202,57 @@ compute_cost_control_hessian( const StageCostFunction& stage_cost, const State& 
         double f_pm = safe_eval( stage_cost, x, u + du_i - du_j, time_idx );
         double f_mp = safe_eval( stage_cost, x, u - du_i + du_j, time_idx );
         double f_mm = safe_eval( stage_cost, x, u - du_i - du_j, time_idx );
+        H( i, j )   = ( f_pp - f_pm - f_mp + f_mm ) / ( 4 * epsilon * epsilon );
+      }
+    }
+  }
+  return H;
+}
+
+inline Eigen::VectorXd
+compute_terminal_cost_gradient( const TerminalCostFunction& terminal_cost, const State& x )
+{
+  Eigen::VectorXd grad    = Eigen::VectorXd::Zero( x.size() );
+  const double    epsilon = 1e-6;
+  for( int i = 0; i < x.size(); ++i )
+  {
+    State dx  = State::Zero( x.size() );
+    dx( i )   = epsilon;
+    grad( i ) = ( terminal_cost( x + dx ) - terminal_cost( x - dx ) ) / ( 2 * epsilon );
+  }
+  return grad;
+}
+
+inline Eigen::MatrixXd
+compute_terminal_cost_hessian( const TerminalCostFunction& terminal_cost, const State& x )
+{
+  const int       n       = x.size();
+  Eigen::MatrixXd H       = Eigen::MatrixXd::Zero( n, n );
+  const double    epsilon = 1e-5;
+
+  for( int i = 0; i < n; ++i )
+  {
+    State dx       = State::Zero( n );
+    dx( i )        = epsilon;
+    double f_plus  = safe_eval_terminal( terminal_cost, x + dx );
+    double f       = safe_eval_terminal( terminal_cost, x );
+    double f_minus = safe_eval_terminal( terminal_cost, x - dx );
+    H( i, i )      = ( f_plus - 2 * f + f_minus ) / ( epsilon * epsilon );
+  }
+
+  for( int i = 0; i < n; ++i )
+  {
+    for( int j = 0; j < n; ++j )
+    {
+      if( i != j )
+      {
+        State dx_i = State::Zero( n ), dx_j = State::Zero( n );
+        dx_i( i )   = epsilon;
+        dx_j( j )   = epsilon;
+        double f_pp = safe_eval_terminal( terminal_cost, x + dx_i + dx_j );
+        double f_pm = safe_eval_terminal( terminal_cost, x + dx_i - dx_j );
+        double f_mp = safe_eval_terminal( terminal_cost, x - dx_i + dx_j );
+        double f_mm = safe_eval_terminal( terminal_cost, x - dx_i - dx_j );
         H( i, j )   = ( f_pp - f_pm - f_mp + f_mm ) / ( 4 * epsilon * epsilon );
       }
     }

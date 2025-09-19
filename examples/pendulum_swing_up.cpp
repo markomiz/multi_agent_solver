@@ -1,16 +1,16 @@
-#include <chrono>
 #include <cmath>
+
+#include <chrono>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
+#include "example_utils.hpp"
 #include "models/pendulum_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
-
-#include "example_utils.hpp"
 
 mas::OCP
 create_pendulum_swingup_ocp()
@@ -31,14 +31,15 @@ create_pendulum_swingup_ocp()
   const double w_theta    = 10.0;
   const double w_omega    = 1.0;
   const double w_torque   = 0.01;
-  const double torque_max = 2.0;
+  const double torque_max = 3.0;
 
-  problem.stage_cost = [=]( const State& x, const Control& u, size_t ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    double tau   = u( 0 );
-    return w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 );
-  };
+  // problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
+  //   double theta = x( 0 );
+  //   double omega = x( 1 );
+  //   double tau   = u( 0 );
+  //   return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) * t_idx /
+  //   100.0;
+  // };
 
   problem.terminal_cost = [=]( const State& x ) {
     double theta = x( 0 );
@@ -103,7 +104,7 @@ parse_options( int argc, char** argv )
   Options options;
   for( int i = 1; i < argc; ++i )
   {
-    std::string arg = argv[i];
+    std::string arg              = argv[i];
     auto        match_with_value = [&]( const std::string& name, std::string& out ) {
       const std::string prefix = name + "=";
       if( arg == name )
@@ -173,17 +174,14 @@ main( int argc, char** argv )
     auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );
 
-    const auto start        = std::chrono::steady_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     mas::solve( solver, problem );
-    const auto end          = std::chrono::steady_clock::now();
+    const auto   end        = std::chrono::steady_clock::now();
     const double elapsed_ms = std::chrono::duration<double, std::milli>( end - start ).count();
 
     const std::string solver_name = examples::canonical_solver_name( options.solver );
-    std::cout << std::fixed << std::setprecision( 6 )
-              << "solver=" << solver_name
-              << " cost=" << problem.best_cost
-              << " time_ms=" << elapsed_ms
-              << '\n';
+    std::cout << std::fixed << std::setprecision( 6 ) << "solver=" << solver_name << " cost=" << problem.best_cost
+              << " time_ms=" << elapsed_ms << '\n';
   }
   catch( const std::exception& e )
   {

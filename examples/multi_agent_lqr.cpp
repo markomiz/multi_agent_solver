@@ -194,6 +194,18 @@ main( int argc, char** argv )
               << " cost=" << solution.total_cost
               << " time_ms=" << elapsed_ms
               << '\n';
+
+    if( problem.blocks.empty() )
+      problem.compute_offsets();
+
+    for( std::size_t idx = 0; idx < solution.states.size() && idx < problem.blocks.size(); ++idx )
+    {
+      const auto& block      = problem.blocks[idx];
+      const auto& ocp        = *block.agent->ocp;
+      const std::string base = "agent_" + std::to_string( block.agent_id );
+      examples::print_state_trajectory( std::cout, solution.states[idx], ocp.dt, base );
+      examples::print_control_trajectory( std::cout, solution.controls[idx], ocp.dt, base );
+    }
   }
   catch( const std::exception& e )
   {

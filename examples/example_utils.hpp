@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "Eigen/Dense"
+
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/strategies/strategy.hpp"
 
@@ -116,6 +118,52 @@ print_available( std::ostream& os )
     os << ' ' << solver;
   os << '\n';
   os << "Available strategies: centralized, sequential, linesearch, trustregion\n";
+}
+
+inline void
+print_state_trajectory( std::ostream& os, const Eigen::MatrixXd& states, double dt, const std::string& label )
+{
+  if( states.size() == 0 )
+    return;
+
+  os << label << "_states\n";
+  os << "time";
+  for( int row = 0; row < states.rows(); ++row )
+    os << ",x" << row;
+  os << '\n';
+
+  for( int col = 0; col < states.cols(); ++col )
+  {
+    const double time_value = dt > 0.0 ? static_cast<double>( col ) * dt : static_cast<double>( col );
+    os << time_value;
+    for( int row = 0; row < states.rows(); ++row )
+      os << ',' << states( row, col );
+    os << '\n';
+  }
+  os << '\n';
+}
+
+inline void
+print_control_trajectory( std::ostream& os, const Eigen::MatrixXd& controls, double dt, const std::string& label )
+{
+  if( controls.size() == 0 )
+    return;
+
+  os << label << "_controls\n";
+  os << "time";
+  for( int row = 0; row < controls.rows(); ++row )
+    os << ",u" << row;
+  os << '\n';
+
+  for( int col = 0; col < controls.cols(); ++col )
+  {
+    const double time_value = dt > 0.0 ? static_cast<double>( col ) * dt : static_cast<double>( col );
+    os << time_value;
+    for( int row = 0; row < controls.rows(); ++row )
+      os << ',' << controls( row, col );
+    os << '\n';
+  }
+  os << '\n';
 }
 
 } // namespace examples

@@ -182,6 +182,9 @@ main( int argc, char** argv )
     const std::string solver_name = examples::canonical_solver_name( options.solver );
     std::cout << std::fixed << std::setprecision( 6 ) << "solver=" << solver_name << " cost=" << problem.best_cost
               << " time_ms=" << elapsed_ms << '\n';
+
+    examples::print_state_trajectory( std::cout, problem.best_states, problem.dt, "pendulum" );
+    examples::print_control_trajectory( std::cout, problem.best_controls, problem.dt, "pendulum" );
   }
   catch( const std::exception& e )
   {

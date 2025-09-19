@@ -49,6 +49,27 @@ If you prefer to build manually:
 ./scripts/run.sh
 ```
 
+### **Utility scripts**
+
+The repository includes Python helpers for benchmarking and visualising the example executables. Both scripts accept `--help` for the full list of options.
+
+* **Compare solvers** – build the project (unless `--skip-build` is supplied) and benchmark multiple solver/strategy combinations:
+
+  ```bash
+  ./scripts/compare_solvers.py --build-type Release --examples multi_agent_lqr multi_agent_single_track \
+      --solvers ilqr cgd --strategies centralized sequential --agents 8
+  ```
+
+  When the executables finish successfully, the script prints a compact table that lists the cost and runtime reported by each run.
+
+* **Plot trajectories** – run a single example and plot the CSV-style trajectories it prints. Additional arguments after `--` are forwarded to the example executable:
+
+  ```bash
+  ./scripts/plot_example.py multi_agent_lqr -- --agents 4 --solver ilqr --strategy sequential
+  ```
+
+  By default the script opens an interactive Matplotlib window. Use `--output-dir plots --no-show` to save the generated figures as PNG files instead.
+
 ## 📂 **Project Structure**
 
 ```

@@ -22,7 +22,7 @@ rocket_dynamics( const RocketParameters& params, const mas::State& state, const 
   mas::State derivative = mas::State::Zero( 3 );
 
   const double mass   = std::max( state( 2 ), 1e-6 );
-  const double thrust = control( 0 );
+  const double thrust = mass > 0 ? control( 0 ) : 0.0;
 
   derivative( 0 ) = state( 1 );
   derivative( 1 ) = thrust / mass - params.gravity;

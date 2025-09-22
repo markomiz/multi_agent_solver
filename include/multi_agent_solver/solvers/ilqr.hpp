@@ -224,6 +224,9 @@ public:
       double            best_merit = current_merit;
       StateTrajectory   best_x     = x;
       ControlTrajectory best_u     = u;
+      double            last_merit = std::numeric_limits<double>::infinity();
+      StateTrajectory   last_x     = x;
+      ControlTrajectory last_u     = u;
 
       while( alpha >= amin )
       {
@@ -236,6 +239,10 @@ public:
             clamp_controls( u_trial, *problem.input_lower_bounds, *problem.input_upper_bounds );
 
           x_trial.col( t + 1 ) = integrate_rk4( x_trial.col( t ), u_trial.col( t ), dt, problem.dynamics );
+          if( problem.state_lower_bounds )
+            x_trial.col( t + 1 ) = x_trial.col( t + 1 ).cwiseMax( *problem.state_lower_bounds );
+          if( problem.state_upper_bounds )
+            x_trial.col( t + 1 ) = x_trial.col( t + 1 ).cwiseMin( *problem.state_upper_bounds );
         }
 
         const double trial_merit = compute_merit( problem, x_trial, u_trial );
@@ -246,7 +253,17 @@ public:
           best_u     = u_trial;
           break;
         }
+        last_merit = trial_merit;
+        last_x     = x_trial;
+        last_u     = u_trial;
         alpha *= 0.5;
+      }
+
+      if( best_merit >= current_merit && std::isfinite( last_merit ) )
+      {
+        best_merit = last_merit;
+        best_x     = last_x;
+        best_u     = last_u;
       }
 
       const double improvement = current_merit - best_merit;

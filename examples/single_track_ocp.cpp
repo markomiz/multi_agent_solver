@@ -4,12 +4,11 @@
 #include <stdexcept>
 #include <string>
 
+#include "example_utils.hpp"
 #include "models/single_track_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
-
-#include "example_utils.hpp"
 
 mas::OCP
 create_single_track_lane_following_ocp()
@@ -20,7 +19,7 @@ create_single_track_lane_following_ocp()
   // Dimensions
   problem.state_dim     = 4;
   problem.control_dim   = 2;
-  problem.horizon_steps = 30;  // Example: 5 steps for testing.
+  problem.horizon_steps = 80;
   problem.dt            = 0.1; // 0.1 s per step.
 
   // Initial state: for example, X=1, Y=1, psi=1, vx=1
@@ -34,10 +33,10 @@ create_single_track_lane_following_ocp()
   const double desired_velocity = 1.0; // [m/s]
 
   // Cost weights.
-  const double w_lane  = 1.0; // Penalize lateral deviation.
-  const double w_speed = 1.0; // Penalize speed error.
-  const double w_delta = 0.1; // Penalize steering.
-  const double w_acc   = 0.1; // Penalize acceleration.
+  const double w_lane  = 10.0; // Penalize lateral deviation.
+  const double w_speed = 1.0;  // Penalize speed error.
+  const double w_delta = 0.1;  // Penalize steering.
+  const double w_acc   = 0.1;  // Penalize acceleration.
 
   // Stage cost function.
   problem.stage_cost = [=]( const State& state, const Control& control, size_t idx ) -> double {
@@ -130,7 +129,7 @@ parse_options( int argc, char** argv )
   Options options;
   for( int i = 1; i < argc; ++i )
   {
-    std::string arg = argv[i];
+    std::string arg              = argv[i];
     auto        match_with_value = [&]( const std::string& name, std::string& out ) {
       const std::string prefix = name + "=";
       if( arg == name )
@@ -200,17 +199,14 @@ main( int argc, char** argv )
     auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );
 
-    const auto start        = std::chrono::steady_clock::now();
+    const auto start = std::chrono::steady_clock::now();
     mas::solve( solver, problem );
-    const auto end          = std::chrono::steady_clock::now();
+    const auto   end        = std::chrono::steady_clock::now();
     const double elapsed_ms = std::chrono::duration<double, std::milli>( end - start ).count();
 
     const std::string solver_name = examples::canonical_solver_name( options.solver );
-    std::cout << std::fixed << std::setprecision( 6 )
-              << "solver=" << solver_name
-              << " cost=" << problem.best_cost
-              << " time_ms=" << elapsed_ms
-              << '\n';
+    std::cout << std::fixed << std::setprecision( 6 ) << "solver=" << solver_name << " cost=" << problem.best_cost
+              << " time_ms=" << elapsed_ms << '\n';
 
     examples::print_state_trajectory( std::cout, problem.best_states, problem.dt, "single_track" );
     examples::print_control_trajectory( std::cout, problem.best_controls, problem.dt, "single_track" );

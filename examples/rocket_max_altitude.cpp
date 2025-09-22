@@ -17,12 +17,12 @@ create_max_altitude_rocket_ocp()
   RocketParameters params;
   params.initial_mass     = 1.0;
   params.gravity          = 9.81;
-  params.exhaust_velocity = 25.0;
+  params.exhaust_velocity = 50.0;
 
   OCP problem;
   problem.state_dim     = 3;
   problem.control_dim   = 1;
-  problem.horizon_steps = 40;
+  problem.horizon_steps = 50;
   problem.dt            = 0.1;
 
   problem.initial_state      = State::Zero( problem.state_dim );
@@ -45,7 +45,9 @@ create_max_altitude_rocket_ocp()
   problem.terminal_cost = [=]( const State& state ) {
     const double altitude       = state( 0 );
     const double velocity_error = state( 1 ) - desired_terminal_vel;
-    return -w_terminal_altitude * altitude + 0.5 * w_terminal_velocity * velocity_error * velocity_error;
+    const double alt_sign       = altitude >= 0.0 ? 1.0 : -1.0;
+    return -w_terminal_altitude * altitude * altitude * alt_sign + 0.5 * w_terminal_velocity * velocity_error * velocity_error
+         + state( 2 ) * state( 2 ) * 1e2;
   };
 
 
@@ -70,6 +72,9 @@ create_max_altitude_rocket_ocp()
   Eigen::VectorXd x_upper    = Eigen::VectorXd::Constant( problem.state_dim, std::numeric_limits<double>::max() );
   x_upper( 2 )               = params.initial_mass;
   problem.state_upper_bounds = x_upper;
+
+  // initialize controls with just constant steady thrust
+  problem.initial_controls = ControlTrajectory::Constant( problem.control_dim, problem.horizon_steps, max_thrust / 2.0 );
 
   problem.initialize_problem();
   problem.verify_problem();

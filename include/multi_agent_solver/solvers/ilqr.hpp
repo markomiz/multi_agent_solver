@@ -34,6 +34,8 @@ public:
     , inequality_activation_tolerance( 1e-6 )
     , equality_dim( 0 )
     , inequality_dim( 0 )
+    , inequality_function_dim( 0 )
+    , state_bound_dim( 0 )
   {}
 
   void
@@ -140,17 +142,37 @@ public:
           q_uu_step[t] += penalty_parameter * eq_jacobian_u[t].transpose() * eq_jacobian_u[t];
         }
 
-        if( inequality_dim > 0 && problem.inequality_constraints )
+        if( inequality_dim > 0 )
         {
-          ineq_residuals[t] = problem.inequality_constraints( x.col( t ), u.col( t ) );
-          ineq_jacobian_x[t]
-            = problem.inequality_constraints_state_jacobian
-                ? problem.inequality_constraints_state_jacobian( x.col( t ), u.col( t ) )
-                : compute_constraints_state_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
-          ineq_jacobian_u[t]
-            = problem.inequality_constraints_control_jacobian
-                ? problem.inequality_constraints_control_jacobian( x.col( t ), u.col( t ) )
-                : compute_constraints_control_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
+          ineq_residuals[t].setZero();
+          ineq_jacobian_x[t].setZero();
+          ineq_jacobian_u[t].setZero();
+
+          if( inequality_function_dim > 0 && problem.inequality_constraints )
+          {
+            ineq_residuals[t].head( inequality_function_dim )
+              = problem.inequality_constraints( x.col( t ), u.col( t ) );
+            const Eigen::MatrixXd jac_x
+              = problem.inequality_constraints_state_jacobian
+                  ? problem.inequality_constraints_state_jacobian( x.col( t ), u.col( t ) )
+                  : compute_constraints_state_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
+            const Eigen::MatrixXd jac_u
+              = problem.inequality_constraints_control_jacobian
+                  ? problem.inequality_constraints_control_jacobian( x.col( t ), u.col( t ) )
+                  : compute_constraints_control_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
+
+            ineq_jacobian_x[t].block( 0, 0, inequality_function_dim, nx ) = jac_x;
+            ineq_jacobian_u[t].block( 0, 0, inequality_function_dim, nu ) = jac_u;
+          }
+
+          if( state_bound_dim > 0 )
+          {
+            fill_state_bound_residuals( problem, x.col( t ),
+                                        ineq_residuals[t].segment( inequality_function_dim, state_bound_dim ) );
+            fill_state_bound_jacobians( problem,
+                                        ineq_jacobian_x[t].block( inequality_function_dim, 0, state_bound_dim, nx ),
+                                        ineq_jacobian_u[t].block( inequality_function_dim, 0, state_bound_dim, nu ) );
+          }
 
           const Eigen::VectorXd slack  = ineq_residuals[t].cwiseMax( 0.0 );
           const Eigen::ArrayXd   active
@@ -244,9 +266,16 @@ public:
           eq_multipliers[t] += penalty_parameter * residual;
           eq_violation_norm += residual.squaredNorm();
         }
-        if( inequality_dim > 0 && problem.inequality_constraints )
+        if( inequality_dim > 0 )
         {
-          const Eigen::VectorXd residual = problem.inequality_constraints( x.col( t ), u.col( t ) );
+          Eigen::VectorXd residual = Eigen::VectorXd::Zero( inequality_dim );
+          if( inequality_function_dim > 0 && problem.inequality_constraints )
+            residual.head( inequality_function_dim )
+              = problem.inequality_constraints( x.col( t ), u.col( t ) );
+          if( state_bound_dim > 0 )
+            fill_state_bound_residuals( problem, x.col( t ),
+                                        residual.segment( inequality_function_dim, state_bound_dim ) );
+
           const Eigen::VectorXd positive = residual.cwiseMax( 0.0 );
           ineq_multipliers[t]            = ( ineq_multipliers[t] + penalty_parameter * positive ).cwiseMax( 0.0 );
           ineq_violation_norm += positive.squaredNorm();
@@ -315,12 +344,19 @@ private:
     if( problem.initial_controls.cols() == T )
       default_control = problem.initial_controls.col( 0 );
 
-    equality_dim   = 0;
-    inequality_dim = 0;
+    equality_dim            = 0;
+    inequality_dim          = 0;
+    inequality_function_dim = 0;
+    state_bound_dim         = 0;
     if( problem.equality_constraints )
       equality_dim = static_cast<int>( problem.equality_constraints( problem.initial_state, default_control ).size() );
     if( problem.inequality_constraints )
-      inequality_dim = static_cast<int>( problem.inequality_constraints( problem.initial_state, default_control ).size() );
+      inequality_function_dim
+        = static_cast<int>( problem.inequality_constraints( problem.initial_state, default_control ).size() );
+    if( problem.state_lower_bounds || problem.state_upper_bounds )
+      state_bound_dim = 2 * nx;
+
+    inequality_dim = inequality_function_dim + state_bound_dim;
 
     if( equality_dim > 0 )
     {
@@ -373,6 +409,7 @@ private:
 
     v_x.resize( nx );
     v_xx.resize( nx, nx );
+    identity_nx = Eigen::MatrixXd::Identity( nx, nx );
     identity_nu = Eigen::MatrixXd::Identity( nu, nu );
   }
 
@@ -390,10 +427,17 @@ private:
         const Eigen::VectorXd residual = problem.equality_constraints( states.col( t ), controls.col( t ) );
         merit += eq_multipliers[t].dot( residual ) + 0.5 * penalty_parameter * residual.squaredNorm();
       }
-      if( inequality_dim > 0 && problem.inequality_constraints )
+      if( inequality_dim > 0 )
       {
-        const Eigen::VectorXd residual = problem.inequality_constraints( states.col( t ), controls.col( t ) );
-        const Eigen::VectorXd slack    = residual.cwiseMax( 0.0 );
+        Eigen::VectorXd residual = Eigen::VectorXd::Zero( inequality_dim );
+        if( inequality_function_dim > 0 && problem.inequality_constraints )
+          residual.head( inequality_function_dim )
+            = problem.inequality_constraints( states.col( t ), controls.col( t ) );
+        if( state_bound_dim > 0 )
+          fill_state_bound_residuals( problem, states.col( t ),
+                                      residual.segment( inequality_function_dim, state_bound_dim ) );
+
+        const Eigen::VectorXd slack  = residual.cwiseMax( 0.0 );
         const Eigen::ArrayXd   active
           = ( residual.array() > -inequality_activation_tolerance ).cast<double>();
         const Eigen::VectorXd active_slack      = slack.array() * active;
@@ -404,6 +448,37 @@ private:
     }
 
     return merit;
+  }
+
+  void
+  fill_state_bound_residuals( const OCP& problem, const Eigen::VectorXd& state,
+                              Eigen::Ref<Eigen::VectorXd> residual_segment ) const
+  {
+    residual_segment.setConstant( -1.0 );
+    if( state_bound_dim == 0 )
+      return;
+
+    const int nx = static_cast<int>( state.size() );
+    if( problem.state_upper_bounds )
+      residual_segment.head( nx ) = state - *problem.state_upper_bounds;
+    if( problem.state_lower_bounds )
+      residual_segment.tail( nx ) = *problem.state_lower_bounds - state;
+  }
+
+  void
+  fill_state_bound_jacobians( const OCP& problem, Eigen::Ref<Eigen::MatrixXd> jacobian_x_segment,
+                              Eigen::Ref<Eigen::MatrixXd> jacobian_u_segment ) const
+  {
+    jacobian_x_segment.setZero();
+    jacobian_u_segment.setZero();
+    if( state_bound_dim == 0 )
+      return;
+
+    const int nx = static_cast<int>( jacobian_x_segment.cols() );
+    if( problem.state_upper_bounds )
+      jacobian_x_segment.block( 0, 0, nx, nx ) = identity_nx;
+    if( problem.state_lower_bounds )
+      jacobian_x_segment.block( nx, 0, nx, nx ) = -identity_nx;
   }
 
   //---------------- data members ---------------------------------------//
@@ -419,6 +494,8 @@ private:
 
   int equality_dim;
   int inequality_dim;
+  int inequality_function_dim;
+  int state_bound_dim;
 
   std::vector<Eigen::VectorXd> k;
   std::vector<Eigen::MatrixXd> k_matrix;
@@ -457,6 +534,7 @@ private:
 
   Eigen::VectorXd v_x;
   Eigen::MatrixXd v_xx;
+  Eigen::MatrixXd identity_nx;
   Eigen::MatrixXd identity_nu;
 };
 

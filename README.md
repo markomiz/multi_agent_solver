@@ -15,7 +15,22 @@ Additionally, it supports multi-agent coordination through Nash Equilibrium-base
 * **OsqpEigen** - Eigen wrapper for OSQP
 * **OpenMP** - Multi-threading support
 
-All dependencies can be automatically installed with the setup_dependencies.sh script 
+All dependencies can be automatically installed with the `setup_dependencies.sh` script.
+
+> **Tip:** On host machines you can customise how dependencies are installed:
+>
+> ```bash
+> ./scripts/setup_dependencies.sh              # install system packages (if supported) and build third-party libraries
+> ./scripts/setup_dependencies.sh --no-system-packages  # skip package manager operations (dependencies already installed)
+> PREFIX="$HOME/.local" ./scripts/setup_dependencies.sh  # install OSQP/OsqpEigen into a custom prefix
+> ```
+>
+> The script detects the operating system, chooses a supported package manager (`apt`, `brew`, `pacman`, `dnf`, or `yum`), and
+> gracefully falls back if none is available. Third-party libraries are built into a user-writable prefix (`$HOME/.local` by
+> default) and the `CMAKE_PREFIX_PATH` environment variable is configured so subsequent CMake invocations can discover them.
+> The script also drops a reusable environment snippet at `$PREFIX/share/multi_agent_solver/environment.sh`; source it (or add
+> it to your shell profile) to make the prefix available to manual CMake builds. When running in Docker/CI environments the
+> defaults continue to work without additional flags.
 
 ---
 
@@ -33,6 +48,9 @@ This will:
 * Rebuild the Docker image
 * Run the container interactively
 
+> **Note:** The Docker build context excludes local `build/` and `cmake-build-*` directories via `.dockerignore`, ensuring host
+> build artifacts never sneak into container images.
+
 
 ## 📝 **Manual Build (Without Docker)**
 
@@ -42,6 +60,13 @@ If you prefer to build manually:
 ./scripts/setup_dependencies.sh
 ./scripts/build.sh
 ```
+
+The build helper understands both `./scripts/build.sh Release` and `./scripts/build.sh --build-type Release`. It automatically
+loads the generated dependency hints when `CMAKE_PREFIX_PATH` is unset so Docker builds and fresh shells continue to locate
+OSQP/OsqpEigen without extra configuration. Use
+`--clean` to start from a blank build directory; otherwise the script automatically removes the cached tree when
+`CMAKE_SYSTEM_NAME` from a previous configuration does not match the current host (e.g., switching between local and
+Docker builds).
 
 ### **Run the Examples:**
 

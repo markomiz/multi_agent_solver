@@ -28,7 +28,9 @@ All dependencies can be automatically installed with the `setup_dependencies.sh`
 > The script detects the operating system, chooses a supported package manager (`apt`, `brew`, `pacman`, `dnf`, or `yum`), and
 > gracefully falls back if none is available. Third-party libraries are built into a user-writable prefix (`$HOME/.local` by
 > default) and the `CMAKE_PREFIX_PATH` environment variable is configured so subsequent CMake invocations can discover them.
-> When running in Docker/CI environments the defaults continue to work without additional flags.
+> The script also drops a reusable environment snippet at `$PREFIX/share/multi_agent_solver/environment.sh`; source it (or add
+> it to your shell profile) to make the prefix available to manual CMake builds. When running in Docker/CI environments the
+> defaults continue to work without additional flags.
 
 ---
 
@@ -59,7 +61,9 @@ If you prefer to build manually:
 ./scripts/build.sh
 ```
 
-The build helper understands both `./scripts/build.sh Release` and `./scripts/build.sh --build-type Release`. Use
+The build helper understands both `./scripts/build.sh Release` and `./scripts/build.sh --build-type Release`. It automatically
+loads the generated dependency hints when `CMAKE_PREFIX_PATH` is unset so Docker builds and fresh shells continue to locate
+OSQP/OsqpEigen without extra configuration. Use
 `--clean` to start from a blank build directory; otherwise the script automatically removes the cached tree when
 `CMAKE_SYSTEM_NAME` from a previous configuration does not match the current host (e.g., switching between local and
 Docker builds).

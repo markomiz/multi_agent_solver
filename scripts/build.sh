@@ -60,6 +60,19 @@ fi
 
 BUILD_DIR="build/${BUILD_TYPE,,}" # lowercase
 
+DEFAULT_PREFIX="${PREFIX:-$HOME/.local}"
+ENV_HINT="$DEFAULT_PREFIX/share/multi_agent_solver/environment.sh"
+if [[ -z "${CMAKE_PREFIX_PATH:-}" ]]; then
+  if [[ -f "$ENV_HINT" ]]; then
+    # shellcheck disable=SC1090
+    source "$ENV_HINT"
+    echo "📚 Loaded CMAKE_PREFIX_PATH hints from $ENV_HINT"
+  elif [[ -d "$DEFAULT_PREFIX/lib/cmake" || -d "$DEFAULT_PREFIX/lib64/cmake" || -d "$DEFAULT_PREFIX/share/cmake" ]]; then
+    export CMAKE_PREFIX_PATH="$DEFAULT_PREFIX"
+    echo "📚 Defaulting CMAKE_PREFIX_PATH to $DEFAULT_PREFIX"
+  fi
+fi
+
 clean_build_dir=0
 if [[ $CLEAN -eq 1 ]]; then
   clean_build_dir=1

@@ -28,18 +28,48 @@ create_linear_lqr_ocp( int n_x, int n_u, double dt, int T )
   ocp.control_dim   = n_u;
   ocp.dt            = dt;
   ocp.horizon_steps = T;
-  ocp.initial_state = Eigen::VectorXd::Random( n_x );
+  Eigen::VectorXd initial_state = Eigen::VectorXd::Zero( n_x );
+  if( n_x > 0 )
+    initial_state[0] = 1.0;
+  ocp.initial_state = initial_state;
 
   Eigen::MatrixXd A = Eigen::MatrixXd::Identity( n_x, n_x );
   Eigen::MatrixXd B = Eigen::MatrixXd::Identity( n_x, n_u );
   ocp.dynamics      = [A, B]( const State& x, const Control& u ) { return A * x + B * u; };
+  ocp.dynamics_state_jacobian
+    = [A]( const MotionModel&, const State&, const Control& ) { return A; };
+  ocp.dynamics_control_jacobian
+    = [B]( const MotionModel&, const State&, const Control& ) { return B; };
 
   Eigen::MatrixXd Q = Eigen::MatrixXd::Identity( n_x, n_x );
   Eigen::MatrixXd R = Eigen::MatrixXd::Identity( n_u, n_u );
-  ocp.stage_cost    = [Q, R]( const State& x, const Control& u, std::size_t ) {
+  Eigen::MatrixXd        Qf     = Q;
+  const Eigen::MatrixXd  Qt     = Q + Q.transpose();
+  const Eigen::MatrixXd  Rt     = R + R.transpose();
+  const Eigen::MatrixXd  Qf_sym = Qf + Qf.transpose();
+  ocp.stage_cost             = [Q, R]( const State& x, const Control& u, std::size_t ) {
     return ( x.transpose() * Q * x ).value() + ( u.transpose() * R * u ).value();
   };
-  ocp.terminal_cost = []( const State& ) { return 0.0; };
+  ocp.cost_state_gradient = [Qt]( const StageCostFunction&, const State& x, const Control&, std::size_t ) {
+    return Qt * x;
+  };
+  ocp.cost_control_gradient = [Rt]( const StageCostFunction&, const State&, const Control& u, std::size_t ) {
+    return Rt * u;
+  };
+  ocp.cost_state_hessian = [Qt]( const StageCostFunction&, const State&, const Control&, std::size_t ) {
+    return Qt;
+  };
+  ocp.cost_control_hessian = [Rt]( const StageCostFunction&, const State&, const Control&, std::size_t ) {
+    return Rt;
+  };
+  ocp.cost_cross_term = [n_x, n_u]( const StageCostFunction&, const State&, const Control&, std::size_t ) {
+    return Eigen::MatrixXd::Zero( n_u, n_x );
+  };
+  ocp.terminal_cost = [Qf]( const State& x ) { return ( x.transpose() * Qf * x ).value(); };
+  ocp.terminal_cost_gradient
+    = [Qf_sym]( const TerminalCostFunction&, const State& x ) { return Qf_sym * x; };
+  ocp.terminal_cost_hessian
+    = [Qf_sym]( const TerminalCostFunction&, const State& ) { return Qf_sym; };
 
   ocp.initialize_problem();
   ocp.verify_problem();

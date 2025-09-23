@@ -42,12 +42,43 @@ create_max_altitude_rocket_ocp()
   };
 
 
+  problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& control, size_t ) {
+    Eigen::VectorXd gradient( 1 );
+    gradient( 0 ) = w_thrust * control( 0 );
+    return gradient;
+  };
+
+  problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
+    Eigen::MatrixXd hessian( 1, 1 );
+    hessian( 0, 0 ) = w_thrust;
+    return hessian;
+  };
+
+  problem.cost_state_gradient = []( const StageCostFunction&, const State& state, const Control&, size_t ) {
+    return Eigen::VectorXd::Zero( state.size() );
+  };
+
+  problem.cost_state_hessian = []( const StageCostFunction&, const State& state, const Control&, size_t ) {
+    return Eigen::MatrixXd::Zero( state.size(), state.size() );
+  };
+
   problem.terminal_cost = [=]( const State& state ) {
     const double altitude       = state( 0 );
     const double velocity_error = state( 1 ) - desired_terminal_vel;
-    const double alt_sign       = altitude >= 0.0 ? 1.0 : -1.0;
-    return -w_terminal_altitude * altitude * altitude * alt_sign + 0.5 * w_terminal_velocity * velocity_error * velocity_error
-         + state( 2 ) * state( 2 ) * 1e2;
+    return -w_terminal_altitude * altitude + 0.5 * w_terminal_velocity * velocity_error * velocity_error;
+  };
+
+  problem.terminal_cost_gradient = [=]( const TerminalCostFunction&, const State& state ) {
+    Eigen::VectorXd gradient = Eigen::VectorXd::Zero( state.size() );
+    gradient( 0 )            = -w_terminal_altitude;
+    gradient( 1 )            = w_terminal_velocity * ( state( 1 ) - desired_terminal_vel );
+    return gradient;
+  };
+
+  problem.terminal_cost_hessian = [=]( const TerminalCostFunction&, const State& state ) {
+    Eigen::MatrixXd hessian = Eigen::MatrixXd::Zero( state.size(), state.size() );
+    hessian( 1, 1 )         = w_terminal_velocity;
+    return hessian;
   };
 
 

@@ -9,7 +9,6 @@
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
 namespace mas
@@ -22,9 +21,21 @@ namespace mas
  * All scratch buffers (multipliers, penalty parameter) live on the object,
  * so nothing is reallocated between calls.
  */
+template<typename Scalar = double>
 class CGD
 {
 public:
+  using ScalarType           = Scalar;
+  using State                = StateT<Scalar>;
+  using Control              = ControlT<Scalar>;
+  using StateTrajectory      = StateTrajectoryT<Scalar>;
+  using ControlTrajectory    = ControlTrajectoryT<Scalar>;
+  using ControlGradient      = ControlGradientT<Scalar>;
+  using MotionModel          = MotionModelT<Scalar>;
+  using ObjectiveFunction    = ObjectiveFunctionT<Scalar>;
+  using ConstraintViolations = ConstraintViolationsT<Scalar>;
+  using SolverParams         = SolverParamsT<Scalar>;
+  using Problem              = OCP<Scalar>;
 
   /// Construct from the usual parameter map.
   explicit CGD() {}
@@ -35,8 +46,8 @@ public:
     max_iterations = static_cast<int>( params.at( "max_iterations" ) );
     tolerance      = params.at( "tolerance" );
     max_ms         = params.at( "max_ms" );
-    penalty_param  = 1.0;
-    debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
+    penalty_param  = static_cast<Scalar>( 1 );
+    debug          = params.count( "debug" ) && params.at( "debug" ) > static_cast<Scalar>( 0.5 );
   }
 
   /**
@@ -46,7 +57,7 @@ public:
    * @p problem.best_cost
    */
   void
-  solve( OCP& problem )
+  solve( Problem& problem )
   {
     using clock           = std::chrono::high_resolution_clock;
     const auto start_time = clock::now();
@@ -57,25 +68,28 @@ public:
     auto& state_trajectory = problem.best_states;
     auto& cost             = problem.best_cost;
 
-    state_trajectory = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
+    state_trajectory = integrate_horizon<Scalar>( problem.initial_state, controls, problem.dt, problem.dynamics,
+                                                  integrate_rk4<Scalar> );
 
     cost = compute_augmented_cost( problem, eq_multipliers, ineq_multipliers, penalty_param, state_trajectory, controls );
 
     for( int iter = 0; iter < max_iterations; ++iter )
     {
-      const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start_time ).count();
+      const double elapsed_ms
+        = static_cast<double>( std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start_time ).count() );
 
-      if( elapsed_ms > max_ms && debug )
+      if( elapsed_ms > static_cast<double>( max_ms ) && debug )
       {
         std::cout << "CGD solver terminated early: " << elapsed_ms << " ms > " << max_ms << " ms\n";
         break;
       }
 
-      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics,
-                                                                     problem.objective_function, problem.dt );
+      const ControlGradient gradients
+        = finite_differences_gradient<Scalar>( problem.initial_state, controls, problem.dynamics,
+                                               problem.objective_function, problem.dt );
 
-      const double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
-                                                   problem.dt, {} );
+      const Scalar step_size = armijo_line_search<Scalar>( problem.initial_state, controls, gradients, problem.dynamics,
+                                                           problem.objective_function, problem.dt, {} );
 
       ControlTrajectory trial_controls = controls - step_size * gradients;
       if( problem.input_lower_bounds && problem.input_upper_bounds )
@@ -83,13 +97,13 @@ public:
         clamp_controls( trial_controls, problem.input_lower_bounds.value(), problem.input_upper_bounds.value() );
       }
 
-      const StateTrajectory trial_trajectory = integrate_horizon( problem.initial_state, trial_controls, problem.dt, problem.dynamics,
-                                                                  integrate_rk4 );
+      const StateTrajectory trial_trajectory
+        = integrate_horizon<Scalar>( problem.initial_state, trial_controls, problem.dt, problem.dynamics, integrate_rk4<Scalar> );
 
-      const double trial_cost = compute_augmented_cost( problem, eq_multipliers, ineq_multipliers, penalty_param, trial_trajectory,
-                                                        trial_controls );
+      const Scalar trial_cost
+        = compute_augmented_cost( problem, eq_multipliers, ineq_multipliers, penalty_param, trial_trajectory, trial_controls );
 
-      const double old_cost = cost;
+      const Scalar old_cost = cost;
       if( trial_cost < cost )
       {
         controls         = std::move( trial_controls );
@@ -101,7 +115,7 @@ public:
 
       increase_penalty_parameter( penalty_param, problem, state_trajectory, controls, tolerance );
 
-      if( std::abs( old_cost - trial_cost ) < tolerance && debug )
+      if( std::abs( static_cast<double>( old_cost - trial_cost ) ) < static_cast<double>( tolerance ) && debug )
       {
         std::cout << "CGD solver converged in " << iter << "steps" << std::endl;
         break;
@@ -112,12 +126,13 @@ public:
 private:
 
   void
-  resize_multipliers( const OCP& problem )
+  resize_multipliers( const Problem& problem )
   {
     if( problem.equality_constraints )
     {
-      const auto m = problem.equality_constraints( problem.initial_state, {} ).size();
-      eq_multipliers.setZero( m );
+      Control zero_control = Control::Zero( problem.control_dim );
+      const auto m         = problem.equality_constraints( problem.initial_state, zero_control ).size();
+      eq_multipliers.setZero( static_cast<int>( m ) );
     }
     else
     {
@@ -126,8 +141,9 @@ private:
 
     if( problem.inequality_constraints )
     {
-      const auto p = problem.inequality_constraints( problem.initial_state, {} ).size();
-      ineq_multipliers.setZero( p );
+      Control zero_control = Control::Zero( problem.control_dim );
+      const auto p         = problem.inequality_constraints( problem.initial_state, zero_control ).size();
+      ineq_multipliers.setZero( static_cast<int>( p ) );
     }
     else
     {
@@ -136,13 +152,16 @@ private:
   }
 
   int    max_iterations;
-  double tolerance;
-  double max_ms;
+  Scalar tolerance;
+  Scalar max_ms;
   bool   debug = false;
 
   ConstraintViolations eq_multipliers;
   ConstraintViolations ineq_multipliers;
-  double               penalty_param;
+  Scalar               penalty_param;
 };
+
+using CGDd = CGD<double>;
+using CGDf = CGD<float>;
 
 } // namespace mas

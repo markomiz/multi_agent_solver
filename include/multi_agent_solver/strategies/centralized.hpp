@@ -7,19 +7,25 @@
 namespace mas
 {
 
+template<typename Scalar = double>
 struct CentralizedStrategy
 {
-  Solver solver;
+  using SolverType = mas::SolverVariant<Scalar>;
+  using Problem    = MultiAgentProblemT<Scalar>;
+  using OCPType    = OCP<Scalar>;
+  using Solution   = SolutionT<Scalar>;
 
-  explicit CentralizedStrategy( Solver s ) :
+  SolverType solver;
+
+  explicit CentralizedStrategy( SolverType s ) :
     solver( std::move( s ) )
   {}
 
   Solution
-  operator()( MultiAgentProblem& problem )
+  operator()( Problem& problem )
   {
     problem.compute_offsets();
-    OCP global = problem.build_global_ocp();
+    OCPType global = problem.build_global_ocp();
     mas::solve( solver, global );
 
     Solution sol;
@@ -37,5 +43,8 @@ struct CentralizedStrategy
     return sol;
   }
 };
+
+using CentralizedStrategyd = CentralizedStrategy<double>;
+using CentralizedStrategyf = CentralizedStrategy<float>;
 
 } // namespace mas

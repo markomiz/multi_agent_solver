@@ -11,22 +11,34 @@
 namespace mas
 {
 
-struct AgentBlockInfo
+template<typename Scalar>
+struct AgentBlockInfoT
 {
   std::size_t agent_id;
   int         state_offset;
   int         control_offset;
   int         state_dim;
   int         control_dim;
-  AgentPtr    agent;
+  AgentPtrT<Scalar> agent;
 };
 
-class MultiAgentProblem
+template<typename Scalar = double>
+class MultiAgentProblemT
 {
 public:
 
+  using ScalarType        = Scalar;
+  using AgentType         = AgentT<Scalar>;
+  using AgentPtr          = AgentPtrT<Scalar>;
+  using OCPType           = OCP<Scalar>;
+  using State             = typename OCPType::State;
+  using Control           = typename OCPType::Control;
+  using StateTrajectory   = typename OCPType::StateTrajectory;
+  using ControlTrajectory = typename OCPType::ControlTrajectory;
+  using StateDerivative   = typename OCPType::StateDerivative;
+
   std::vector<AgentPtr>       agents;
-  std::vector<AgentBlockInfo> blocks;
+  std::vector<AgentBlockInfoT<Scalar>> blocks;
 
   void
   add_agent( const AgentPtr& a )
@@ -49,10 +61,10 @@ public:
     }
   }
 
-  OCP
+  OCPType
   build_global_ocp() const
   {
-    OCP g;
+    OCPType g;
     // assume offsets computed
     int total_x = 0, total_u = 0;
     for( auto& b : blocks )
@@ -67,7 +79,7 @@ public:
       g.horizon_steps = blocks.front().agent->ocp->horizon_steps;
       g.dt            = blocks.front().agent->ocp->dt;
     }
-    g.initial_state = Eigen::VectorXd( total_x );
+    g.initial_state = State::Zero( total_x );
     for( auto& b : blocks )
     {
       g.initial_state.segment( b.state_offset, b.state_dim ) = b.agent->ocp->initial_state;
@@ -81,8 +93,8 @@ public:
     }
     if( all_bounds )
     {
-      g.input_lower_bounds = Eigen::VectorXd( total_u );
-      g.input_upper_bounds = Eigen::VectorXd( total_u );
+      g.input_lower_bounds = Control::Zero( total_u );
+      g.input_upper_bounds = Control::Zero( total_u );
       for( auto& b : blocks )
       {
         auto& ocp                                                        = *b.agent->ocp;
@@ -102,7 +114,7 @@ public:
       return out;
     };
     g.stage_cost = [bs = blocks]( const State& full_x, const Control& full_u, size_t t ) {
-      double cost = 0.0;
+      Scalar cost = static_cast<Scalar>( 0 );
       for( auto& b : bs )
       {
         State   x  = full_x.segment( b.state_offset, b.state_dim );
@@ -112,7 +124,7 @@ public:
       return cost;
     };
     g.terminal_cost = [bs = blocks]( const State& full_x ) {
-      double cost = 0.0;
+      Scalar cost = static_cast<Scalar>( 0 );
       for( auto& b : bs )
       {
         State x  = full_x.segment( b.state_offset, b.state_dim );
@@ -126,5 +138,12 @@ public:
     return g;
   }
 };
+
+using AgentBlockInfo  = AgentBlockInfoT<double>;
+using AgentBlockInfof = AgentBlockInfoT<float>;
+
+using MultiAgentProblemd = MultiAgentProblemT<double>;
+using MultiAgentProblemf = MultiAgentProblemT<float>;
+using MultiAgentProblem  = MultiAgentProblemd;
 
 } // namespace mas

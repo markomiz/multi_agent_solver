@@ -14,17 +14,19 @@ namespace mas
 namespace detail
 {
 
-inline Solver
-make_solver_like( const Solver& proto )
+template<typename Variant>
+inline Variant
+make_solver_like( const Variant& proto )
 {
-  return std::visit( []( const auto& s ) -> Solver { return std::decay_t<decltype( s )>{}; }, proto );
+  return std::visit( []( const auto& s ) -> Variant { return std::decay_t<decltype( s )>{}; }, proto );
 }
 
-inline Solution
-collect_solution( MultiAgentProblem& problem )
+template<typename Scalar>
+inline SolutionT<Scalar>
+collect_solution( MultiAgentProblemT<Scalar>& problem )
 {
-  Solution sol;
-  sol.total_cost = 0.0;
+  SolutionT<Scalar> sol;
+  sol.total_cost = static_cast<Scalar>( 0 );
   for( auto& blk : problem.blocks )
   {
     auto& ocp = *blk.agent->ocp;
@@ -36,10 +38,11 @@ collect_solution( MultiAgentProblem& problem )
   return sol;
 }
 
-inline double
-total_cost( MultiAgentProblem& problem )
+template<typename Scalar>
+inline Scalar
+total_cost( MultiAgentProblemT<Scalar>& problem )
 {
-  double    c = 0.0;
+  Scalar    c = static_cast<Scalar>( 0 );
   const int n = static_cast<int>( problem.blocks.size() );
 
 #pragma omp parallel for reduction( + : c ) schedule( static )
@@ -50,10 +53,10 @@ total_cost( MultiAgentProblem& problem )
   return c;
 }
 
+template<typename Scalar>
 inline void
-sequential_solve( std::vector<Solver>& solvers, MultiAgentProblem& problem )
+sequential_solve( std::vector<SolverVariant<Scalar>>& solvers, MultiAgentProblemT<Scalar>& problem )
 {
-  // Parallel Jacobi step: solve all -> update all
   const int n = static_cast<int>( problem.blocks.size() );
 
 #pragma omp parallel for schedule( static )
@@ -71,11 +74,13 @@ sequential_solve( std::vector<Solver>& solvers, MultiAgentProblem& problem )
   }
 }
 
-inline Solution
-run_sequential( int max_outer, const Solver& solver_proto, const SolverParams& params, MultiAgentProblem& problem )
+template<typename Scalar>
+inline SolutionT<Scalar>
+run_sequential( int max_outer, const SolverVariant<Scalar>& solver_proto, const SolverParamsT<Scalar>& params,
+                MultiAgentProblemT<Scalar>& problem )
 {
   problem.compute_offsets();
-  std::vector<Solver> solvers;
+  std::vector<SolverVariant<Scalar>> solvers;
   solvers.reserve( problem.blocks.size() );
   for( std::size_t i = 0; i < problem.blocks.size(); ++i )
   {
@@ -89,11 +94,16 @@ run_sequential( int max_outer, const Solver& solver_proto, const SolverParams& p
   return collect_solution( problem );
 }
 
-inline Solution
-run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& params, MultiAgentProblem& problem )
+template<typename Scalar>
+inline SolutionT<Scalar>
+run_line_search( int max_outer, const SolverVariant<Scalar>& solver_proto, const SolverParamsT<Scalar>& params,
+                 MultiAgentProblemT<Scalar>& problem )
 {
+  using ControlTrajectory = ControlTrajectoryT<Scalar>;
+  using StateTrajectory   = StateTrajectoryT<Scalar>;
+
   problem.compute_offsets();
-  std::vector<Solver> solvers;
+  std::vector<SolverVariant<Scalar>> solvers;
   solvers.reserve( problem.blocks.size() );
   for( std::size_t i = 0; i < problem.blocks.size(); ++i )
   {
@@ -101,14 +111,14 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
     set_params( solvers.back(), params );
   }
 
-  double base_cost = total_cost( problem );
+  Scalar base_cost = total_cost( problem );
   for( int outer = 0; outer < max_outer; ++outer )
   {
     const int n = static_cast<int>( problem.blocks.size() );
 
-    std::vector<ControlTrajectory> old_controls( n );
-    std::vector<StateTrajectory>   old_states( n );
-    for( std::size_t i = 0; i < n; ++i )
+    std::vector<ControlTrajectory> old_controls( static_cast<std::size_t>( n ) );
+    std::vector<StateTrajectory>   old_states( static_cast<std::size_t>( n ) );
+    for( std::size_t i = 0; i < static_cast<std::size_t>( n ); ++i )
     {
       auto& ocp       = *problem.blocks[i].agent->ocp;
       old_controls[i] = ocp.best_controls;
@@ -116,33 +126,34 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
     }
 
     sequential_solve( solvers, problem );
-    double new_cost = total_cost( problem );
+    Scalar new_cost = total_cost( problem );
 
     if( new_cost >= base_cost )
     {
-      std::vector<ControlTrajectory> cand_controls( n );
-      for( std::size_t i = 0; i < n; ++i )
+      std::vector<ControlTrajectory> cand_controls( static_cast<std::size_t>( n ) );
+      for( std::size_t i = 0; i < static_cast<std::size_t>( n ); ++i )
         cand_controls[i] = problem.blocks[i].agent->ocp->best_controls;
 
-      double alpha    = 0.5;
+      Scalar alpha    = static_cast<Scalar>( 0.5 );
       bool   accepted = false;
-      while( alpha > 1e-3 && !accepted )
+      while( alpha > static_cast<Scalar>( 1e-3 ) && !accepted )
       {
-        std::vector<ControlTrajectory> trial_controls( n );
-        std::vector<StateTrajectory>   trial_states( n );
-        double                         trial_cost = 0.0;
+        std::vector<ControlTrajectory> trial_controls( static_cast<std::size_t>( n ) );
+        std::vector<StateTrajectory>   trial_states( static_cast<std::size_t>( n ) );
+        Scalar                         trial_cost = static_cast<Scalar>( 0 );
 #pragma omp parallel for reduction( + : trial_cost ) schedule( static )
         for( int i = 0; i < n; ++i )
         {
           auto  idx            = static_cast<std::size_t>( i );
           auto& ocp            = *problem.blocks[idx].agent->ocp;
           trial_controls[idx]  = old_controls[idx] + alpha * ( cand_controls[idx] - old_controls[idx] );
-          trial_states[idx]    = integrate_horizon( ocp.initial_state, trial_controls[idx], ocp.dt, ocp.dynamics, integrate_rk4 );
+          trial_states[idx]    = integrate_horizon<Scalar>( ocp.initial_state, trial_controls[idx], ocp.dt, ocp.dynamics,
+                                                            integrate_rk4<Scalar> );
           trial_cost          += ocp.objective_function( trial_states[idx], trial_controls[idx] );
         }
         if( trial_cost < base_cost )
         {
-          for( std::size_t i = 0; i < n; ++i )
+          for( std::size_t i = 0; i < static_cast<std::size_t>( n ); ++i )
           {
             auto& ocp         = *problem.blocks[i].agent->ocp;
             ocp.best_controls = trial_controls[i];
@@ -155,12 +166,12 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
         }
         else
         {
-          alpha *= 0.5;
+          alpha *= static_cast<Scalar>( 0.5 );
         }
       }
       if( !accepted )
       {
-        for( std::size_t i = 0; i < n; ++i )
+        for( std::size_t i = 0; i < static_cast<std::size_t>( n ); ++i )
         {
           auto& ocp         = *problem.blocks[i].agent->ocp;
           ocp.best_controls = old_controls[i];
@@ -179,11 +190,16 @@ run_line_search( int max_outer, const Solver& solver_proto, const SolverParams& 
   return collect_solution( problem );
 }
 
-inline Solution
-run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams& params, MultiAgentProblem& problem )
+template<typename Scalar>
+inline SolutionT<Scalar>
+run_trust_region( int max_outer, const SolverVariant<Scalar>& solver_proto, const SolverParamsT<Scalar>& params,
+                  MultiAgentProblemT<Scalar>& problem )
 {
+  using ControlTrajectory = ControlTrajectoryT<Scalar>;
+  using StateTrajectory   = StateTrajectoryT<Scalar>;
+
   problem.compute_offsets();
-  std::vector<Solver> solvers;
+  std::vector<SolverVariant<Scalar>> solvers;
   solvers.reserve( problem.blocks.size() );
   for( std::size_t i = 0; i < problem.blocks.size(); ++i )
   {
@@ -191,7 +207,7 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
     set_params( solvers.back(), params );
   }
 
-  std::vector<double> radii( problem.blocks.size(), 1.0 );
+  std::vector<Scalar> radii( problem.blocks.size(), static_cast<Scalar>( 1 ) );
 
   for( int outer = 0; outer < max_outer; ++outer )
   {
@@ -207,21 +223,21 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
 
       ControlTrajectory old_u    = ocp.best_controls;
       StateTrajectory   old_x    = ocp.best_states;
-      double            old_cost = ocp.best_cost;
+      Scalar            old_cost = ocp.best_cost;
 
       mas::solve( solvers[idx], ocp );
 
       ControlTrajectory cand_u    = ocp.best_controls;
       StateTrajectory   cand_x    = ocp.best_states;
-      double            cand_cost = ocp.best_cost;
+      Scalar            cand_cost = ocp.best_cost;
 
       ControlTrajectory delta = cand_u - old_u;
-      double            norm  = delta.norm();
+      Scalar            norm  = delta.norm();
       if( norm > radii[idx] )
       {
-        double scale = radii[idx] / norm;
+        Scalar scale = radii[idx] / norm;
         cand_u       = old_u + scale * delta;
-        cand_x       = integrate_horizon( ocp.initial_state, cand_u, ocp.dt, ocp.dynamics, integrate_rk4 );
+        cand_x       = integrate_horizon<Scalar>( ocp.initial_state, cand_u, ocp.dt, ocp.dynamics, integrate_rk4<Scalar> );
         cand_cost    = ocp.objective_function( cand_x, cand_u );
       }
 
@@ -231,7 +247,7 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
         ocp.best_states   = cand_x;
         ocp.best_cost     = cand_cost;
         ocp.update_initial_with_best();
-        radii[idx] *= 1.5;
+        radii[idx] *= static_cast<Scalar>( 1.5 );
       }
       else
       {
@@ -239,7 +255,7 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
         ocp.best_states   = old_x;
         ocp.best_cost     = old_cost;
         ocp.update_initial_with_best();
-        radii[idx] *= 0.5;
+        radii[idx] *= static_cast<Scalar>( 0.5 );
       }
     }
   }
@@ -249,61 +265,86 @@ run_trust_region( int max_outer, const Solver& solver_proto, const SolverParams&
 
 } // namespace detail
 
+template<typename Scalar = double>
 struct SequentialNashStrategy
 {
-  int          max_outer;
-  Solver       solver_proto;
-  SolverParams params;
+  using SolverType  = SolverVariant<Scalar>;
+  using ParamsType  = SolverParamsT<Scalar>;
+  using ProblemType = MultiAgentProblemT<Scalar>;
+  using Solution    = SolutionT<Scalar>;
 
-  SequentialNashStrategy( int outer, Solver s, SolverParams p ) :
+  int         max_outer;
+  SolverType  solver_proto;
+  ParamsType  params;
+
+  SequentialNashStrategy( int outer, SolverType s, ParamsType p ) :
     max_outer( outer ),
     solver_proto( std::move( s ) ),
     params( std::move( p ) )
   {}
 
   Solution
-  operator()( MultiAgentProblem& problem )
+  operator()( ProblemType& problem )
   {
-    return detail::run_sequential( max_outer, solver_proto, params, problem );
+    return detail::run_sequential<Scalar>( max_outer, solver_proto, params, problem );
   }
 };
 
+template<typename Scalar = double>
 struct LineSearchNashStrategy
 {
-  int          max_outer;
-  Solver       solver_proto;
-  SolverParams params;
+  using SolverType  = SolverVariant<Scalar>;
+  using ParamsType  = SolverParamsT<Scalar>;
+  using ProblemType = MultiAgentProblemT<Scalar>;
+  using Solution    = SolutionT<Scalar>;
 
-  LineSearchNashStrategy( int outer, Solver s, SolverParams p ) :
+  int         max_outer;
+  SolverType  solver_proto;
+  ParamsType  params;
+
+  LineSearchNashStrategy( int outer, SolverType s, ParamsType p ) :
     max_outer( outer ),
     solver_proto( std::move( s ) ),
     params( std::move( p ) )
   {}
 
   Solution
-  operator()( MultiAgentProblem& problem )
+  operator()( ProblemType& problem )
   {
-    return detail::run_line_search( max_outer, solver_proto, params, problem );
+    return detail::run_line_search<Scalar>( max_outer, solver_proto, params, problem );
   }
 };
 
+template<typename Scalar = double>
 struct TrustRegionNashStrategy
 {
-  int          max_outer;
-  Solver       solver_proto;
-  SolverParams params;
+  using SolverType  = SolverVariant<Scalar>;
+  using ParamsType  = SolverParamsT<Scalar>;
+  using ProblemType = MultiAgentProblemT<Scalar>;
+  using Solution    = SolutionT<Scalar>;
 
-  TrustRegionNashStrategy( int outer, Solver s, SolverParams p ) :
+  int         max_outer;
+  SolverType  solver_proto;
+  ParamsType  params;
+
+  TrustRegionNashStrategy( int outer, SolverType s, ParamsType p ) :
     max_outer( outer ),
     solver_proto( std::move( s ) ),
     params( std::move( p ) )
   {}
 
   Solution
-  operator()( MultiAgentProblem& problem )
+  operator()( ProblemType& problem )
   {
-    return detail::run_trust_region( max_outer, solver_proto, params, problem );
+    return detail::run_trust_region<Scalar>( max_outer, solver_proto, params, problem );
   }
 };
+
+using SequentialNashStrategyd    = SequentialNashStrategy<double>;
+using SequentialNashStrategyf    = SequentialNashStrategy<float>;
+using LineSearchNashStrategyd    = LineSearchNashStrategy<double>;
+using LineSearchNashStrategyf    = LineSearchNashStrategy<float>;
+using TrustRegionNashStrategyd   = TrustRegionNashStrategy<double>;
+using TrustRegionNashStrategyf   = TrustRegionNashStrategy<float>;
 
 } // namespace mas

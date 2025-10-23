@@ -2,8 +2,11 @@
 /* ---------------  Standard / Eigen / OSQP  ------------------------ */
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <memory>
+#include <type_traits>
+#include <stdexcept>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -20,16 +23,26 @@ namespace mas
 /* =================================================================== */
 /*                    Trapezoidal SQP with OSQP                        */
 /* =================================================================== */
+template<typename Scalar = double>
 class OSQPCollocation
 {
 public:
+
+  static_assert( std::is_same_v<Scalar, double>, "OSQP collocation backend currently supports only double precision" );
+
+  using ScalarType        = Scalar;
+  using StateTrajectory   = StateTrajectoryT<Scalar>;
+  using ControlTrajectory = ControlTrajectoryT<Scalar>;
+  using MotionModel       = MotionModelT<Scalar>;
+  using SolverParams      = SolverParamsT<Scalar>;
+  using Problem           = OCP<Scalar>;
 
   explicit OSQPCollocation() :
     solver{ std::make_unique<OsqpEigen::Solver>() }
   {}
 
   void set_params( const SolverParams& params );
-  void solve( OCP& problem ); // main entry
+  void solve( Problem& problem ); // main entry
 
 private:
 
@@ -47,10 +60,10 @@ private:
   }
 
   /* ---------- phase 1: immutable sparsity pattern ---------------- */
-  void prepare_structure( const OCP& );
+  void prepare_structure( const Problem& );
 
   /* ---------- phase 2: overwrite numeric values ------------------ */
-  void assemble_values( const OCP& p, const StateTrajectory& X, const ControlTrajectory& U, double reg );
+  void assemble_values( const Problem& p, const StateTrajectory& X, const ControlTrajectory& U, Scalar reg );
 
   /* ---------- data ------------------------------------------------ */
   struct qpt
@@ -75,10 +88,10 @@ private:
 
   /* settings */
   int    max_iter{ 20 };
-  double tolerance{ 1e-4 };
+  Scalar tolerance{ static_cast<Scalar>( 1e-4 ) };
   bool   debug{ false };
 
-  double max_ms{ 1000.0 }; // max time in ms
+  Scalar max_ms{ static_cast<Scalar>( 1000.0 ) }; // max time in ms
 
   /* caching ----------------------------------------------------- */
   bool                         use_cache{ true };
@@ -92,17 +105,20 @@ private:
   std::vector<Eigen::MatrixXd> R_cache;  // size T
 };
 
+using OSQPCollocationd = OSQPCollocation<double>;
+
 /* =================================================================== */
 /*                    Implementation details                            */
 /* =================================================================== */
+template<typename Scalar>
 inline void
-OSQPCollocation::set_params( const SolverParams& p )
+OSQPCollocation<Scalar>::set_params( const SolverParams& p )
 {
   max_iter  = static_cast<int>( p.at( "max_iterations" ) );
   tolerance = p.at( "tolerance" );
-  debug     = p.count( "debug" ) && p.at( "debug" ) > 0.5;
-  max_ms    = p.count( "max_ms" ) ? p.at( "max_ms" ) : 1000.0;
-  use_cache = p.count( "cache" ) ? p.at( "cache" ) > 0.5 : true;
+  debug     = p.count( "debug" ) && p.at( "debug" ) > static_cast<Scalar>( 0.5 );
+  max_ms    = p.count( "max_ms" ) ? p.at( "max_ms" ) : static_cast<Scalar>( 1000.0 );
+  use_cache = p.count( "cache" ) ? p.at( "cache" ) > static_cast<Scalar>( 0.5 ) : true;
   solver->settings()->setVerbosity( false );
   solver->settings()->setWarmStart( true );
   solver->settings()->setAdaptiveRho( true );
@@ -117,8 +133,9 @@ OSQPCollocation::set_params( const SolverParams& p )
 /* ------------------------------------------------------------------ */
 /*  Phase-1: build immutable sparsity pattern and initialise OSQP     */
 /* ------------------------------------------------------------------ */
+template<typename Scalar>
 inline void
-OSQPCollocation::prepare_structure( const OCP& p )
+OSQPCollocation<Scalar>::prepare_structure( const Problem& p )
 {
   /* ---------- basic dimensions ---------------------------------- */
   T  = p.horizon_steps;
@@ -240,8 +257,12 @@ OSQPCollocation::prepare_structure( const OCP& p )
   structure_ready = true;
 }
 
+template<typename Scalar>
 inline void
-OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const ControlTrajectory& U, double reg )
+OSQPCollocation<Scalar>::assemble_values( const Problem&           p,
+                                          const StateTrajectory&   X,
+                                          const ControlTrajectory& U,
+                                          Scalar                   reg )
 {
   qp.g.setZero();
   for( int t = 1; t < T; ++t )
@@ -256,7 +277,7 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
   double*     h_val = qp.H.valuePtr();
   std::size_t kH    = 0;
 
-  constexpr double cache_eps = 1e-9;
+  const Scalar cache_eps = static_cast<Scalar>( 1e-9 );
 
   for( int t = 1; t < T; ++t )
   {
@@ -437,14 +458,16 @@ OSQPCollocation::assemble_values( const OCP& p, const StateTrajectory& X, const 
 }
 
 /* ---------- main entry ------------------------------------------- */
+template<typename Scalar>
 inline void
-OSQPCollocation::solve( OCP& problem )
+OSQPCollocation<Scalar>::solve( Problem& problem )
 {
   using clk = std::chrono::high_resolution_clock;
 
   const auto tic      = clk::now();
-  const auto deadline = ( max_ms > 0.0 ) ? tic + std::chrono::milliseconds( static_cast<int>( max_ms ) )
-                                         : clk::time_point::max(); // “infinite” if max_ms ≤ 0
+  const auto deadline = ( max_ms > static_cast<Scalar>( 0 ) )
+                          ? tic + std::chrono::milliseconds( static_cast<int>( max_ms ) )
+                          : clk::time_point::max(); // “infinite” if max_ms ≤ 0
 
   /* dimensions & warm-start guesses ----------------------------- */
   if( !structure_ready )
@@ -462,7 +485,7 @@ OSQPCollocation::solve( OCP& problem )
   U          = problem.initial_controls;
   X.col( 0 ) = problem.initial_state; // x₀ fixed
 
-  constexpr double reg = 1e-6;
+  const Scalar reg = static_cast<Scalar>( 1e-6 );
 
   cache_valid = false; // invalidate caches for fresh solve
 
@@ -484,15 +507,16 @@ OSQPCollocation::solve( OCP& problem )
     const Eigen::VectorXd delta = solver->getSolution();
 
     /* apply step --------------------------------------------- */
-    double step_norm2 = 0.0;
+    Scalar step_norm2 = static_cast<Scalar>( 0 );
     for( int t = 0; t < T; ++t )
     {
       X.col( t + 1 ) += delta.segment( t * nx, nx );
       U.col( t )     += delta.segment( T * nx + t * nu, nu );
-      step_norm2     += delta.segment( t * nx, nx ).squaredNorm() + delta.segment( T * nx + t * nu, nu ).squaredNorm();
+      step_norm2
+        += static_cast<Scalar>( delta.segment( t * nx, nx ).squaredNorm() + delta.segment( T * nx + t * nu, nu ).squaredNorm() );
     }
 
-    if( std::sqrt( step_norm2 ) < tolerance )
+    if( static_cast<Scalar>( std::sqrt( static_cast<double>( step_norm2 ) ) ) < tolerance )
     {
       if( debug )
         std::cerr << "OSQP Collocation  converged in " << it + 1 << " SQP steps\n";

@@ -20,18 +20,34 @@ namespace mas
 /**
  * @brief Augmented-Lagrangian iLQR solver supporting path equality and inequality constraints.
  */
+template<typename Scalar = double>
 class iLQR
 {
 public:
+  using ScalarType             = Scalar;
+  using State                  = StateT<Scalar>;
+  using Control                = ControlT<Scalar>;
+  using StateTrajectory        = StateTrajectoryT<Scalar>;
+  using ControlTrajectory      = ControlTrajectoryT<Scalar>;
+  using MotionModel            = MotionModelT<Scalar>;
+  using ObjectiveFunction      = ObjectiveFunctionT<Scalar>;
+  using ConstraintViolations   = ConstraintViolationsT<Scalar>;
+  using SolverParams           = SolverParamsT<Scalar>;
+  using Problem                = OCP<Scalar>;
+  using Matrix                 = Eigen::Matrix<Scalar, Eigen::Dynamic, Eigen::Dynamic>;
+  using Vector                 = Eigen::Matrix<Scalar, Eigen::Dynamic, 1>;
+  using Array                  = Eigen::Array<Scalar, Eigen::Dynamic, 1>;
+  using LLT                    = Eigen::LLT<Matrix>;
+
   iLQR()
     : max_iterations( 50 )
-    , tolerance( 1e-6 )
-    , max_ms( std::numeric_limits<double>::infinity() )
+    , tolerance( static_cast<Scalar>( 1e-6 ) )
+    , max_ms( std::numeric_limits<Scalar>::infinity() )
     , debug( false )
-    , penalty_parameter( 10.0 )
-    , penalty_increase( 5.0 )
-    , constraint_tolerance( 1e-4 )
-    , inequality_activation_tolerance( 1e-6 )
+    , penalty_parameter( static_cast<Scalar>( 10 ) )
+    , penalty_increase( static_cast<Scalar>( 5 ) )
+    , constraint_tolerance( static_cast<Scalar>( 1e-4 ) )
+    , inequality_activation_tolerance( static_cast<Scalar>( 1e-6 ) )
     , equality_dim( 0 )
     , inequality_dim( 0 )
   {}
@@ -42,7 +58,7 @@ public:
     max_iterations = static_cast<int>( params.at( "max_iterations" ) );
     tolerance      = params.at( "tolerance" );
     max_ms         = params.at( "max_ms" );
-    debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
+    debug          = params.count( "debug" ) && params.at( "debug" ) > static_cast<Scalar>( 0.5 );
 
     if( auto it = params.find( "penalty" ); it != params.end() )
       penalty_parameter = it->second;
@@ -56,7 +72,7 @@ public:
 
   //------------------------------- API ----------------------------------//
   void
-  solve( OCP& problem )
+  solve( Problem& problem )
   {
     using clock      = std::chrono::high_resolution_clock;
     const auto start = clock::now();
@@ -66,23 +82,24 @@ public:
     const int    T  = problem.horizon_steps;
     const int    nx = problem.state_dim;
     const int    nu = problem.control_dim;
-    const double dt = problem.dt;
+    const Scalar dt = problem.dt;
 
     StateTrajectory&   x    = problem.best_states;
     ControlTrajectory& u    = problem.best_controls;
-    double&            cost = problem.best_cost;
+    Scalar&            cost = problem.best_cost;
 
-    x    = integrate_horizon( problem.initial_state, u, dt, problem.dynamics, integrate_rk4 );
+    x    = integrate_horizon<Scalar>( problem.initial_state, u, dt, problem.dynamics, integrate_rk4<Scalar> );
     cost = problem.objective_function( x, u );
 
-    double current_merit = compute_merit( problem, x, u );
+    Scalar current_merit = compute_merit( problem, x, u );
     if( debug )
       std::cout << "iLQR initial cost=" << cost << " merit=" << current_merit << '\n';
 
     for( int iter = 0; iter < max_iterations; ++iter )
     {
-      const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
-      if( elapsed_ms > max_ms )
+      const double elapsed_ms
+        = static_cast<double>( std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count() );
+      if( elapsed_ms > static_cast<double>( max_ms ) )
       {
         if( debug )
           std::cout << "iLQR time limit hit after " << elapsed_ms << " ms / " << max_ms << " ms\n";
@@ -99,7 +116,7 @@ public:
       else
         v_xx.setZero();
 
-      v_xx = 0.5 * ( v_xx + v_xx.transpose() );
+      v_xx = static_cast<Scalar>( 0.5 ) * ( v_xx + v_xx.transpose() );
 
       for( int t = T - 1; t >= 0; --t )
       {
@@ -122,16 +139,15 @@ public:
         {
           eq_residuals[t] = problem.equality_constraints( x.col( t ), u.col( t ) );
           eq_jacobian_x[t]
-            = problem.equality_constraints_state_jacobian ? problem.equality_constraints_state_jacobian( x.col( t ), u.col( t ) )
-                                                           : compute_constraints_state_jacobian( problem.equality_constraints,
-                                                                                                 x.col( t ),
-                                                                                                 u.col( t ) );
+            = problem.equality_constraints_state_jacobian
+                ? problem.equality_constraints_state_jacobian( x.col( t ), u.col( t ) )
+                : compute_constraints_state_jacobian<Scalar>( problem.equality_constraints, x.col( t ), u.col( t ) );
           eq_jacobian_u[t]
             = problem.equality_constraints_control_jacobian
                 ? problem.equality_constraints_control_jacobian( x.col( t ), u.col( t ) )
-                : compute_constraints_control_jacobian( problem.equality_constraints, x.col( t ), u.col( t ) );
+                : compute_constraints_control_jacobian<Scalar>( problem.equality_constraints, x.col( t ), u.col( t ) );
 
-          const Eigen::VectorXd dual = eq_multipliers[t] + penalty_parameter * eq_residuals[t];
+          const Vector dual = eq_multipliers[t] + penalty_parameter * eq_residuals[t];
           q_x_step[t] += eq_jacobian_x[t].transpose() * dual;
           q_u_step[t] += eq_jacobian_u[t].transpose() * dual;
 
@@ -146,23 +162,22 @@ public:
           ineq_jacobian_x[t]
             = problem.inequality_constraints_state_jacobian
                 ? problem.inequality_constraints_state_jacobian( x.col( t ), u.col( t ) )
-                : compute_constraints_state_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
+                : compute_constraints_state_jacobian<Scalar>( problem.inequality_constraints, x.col( t ), u.col( t ) );
           ineq_jacobian_u[t]
             = problem.inequality_constraints_control_jacobian
                 ? problem.inequality_constraints_control_jacobian( x.col( t ), u.col( t ) )
-                : compute_constraints_control_jacobian( problem.inequality_constraints, x.col( t ), u.col( t ) );
+                : compute_constraints_control_jacobian<Scalar>( problem.inequality_constraints, x.col( t ), u.col( t ) );
 
-          const Eigen::VectorXd slack  = ineq_residuals[t].cwiseMax( 0.0 );
-          const Eigen::ArrayXd   active
-            = ( ineq_residuals[t].array() > -inequality_activation_tolerance ).cast<double>();
-          const Eigen::VectorXd dual = ineq_multipliers[t].array() * active + penalty_parameter * slack.array() * active;
+          const Vector slack  = ineq_residuals[t].cwiseMax( static_cast<Scalar>( 0 ) );
+          const Array  active = ( ineq_residuals[t].array() > -inequality_activation_tolerance ).template cast<Scalar>();
+          const Vector dual   = ineq_multipliers[t].array() * active + penalty_parameter * slack.array() * active;
 
           q_x_step[t] += ineq_jacobian_x[t].transpose() * dual;
           q_u_step[t] += ineq_jacobian_u[t].transpose() * dual;
 
           if( active.any() )
           {
-            const Eigen::MatrixXd active_diag = active.matrix().asDiagonal();
+            const Matrix active_diag = active.matrix().asDiagonal();
             q_xx_step[t] += penalty_parameter * ineq_jacobian_x[t].transpose() * active_diag * ineq_jacobian_x[t];
             q_ux_step[t] += penalty_parameter * ineq_jacobian_u[t].transpose() * active_diag * ineq_jacobian_x[t];
             q_uu_step[t] += penalty_parameter * ineq_jacobian_u[t].transpose() * active_diag * ineq_jacobian_u[t];
@@ -171,14 +186,14 @@ public:
 
         q_uu_reg_step[t] = q_uu_step[t];
         auto&  llt       = llt_step[t];
-        double reg       = 1e-6;
+        Scalar reg       = static_cast<Scalar>( 1e-6 );
         while( true )
         {
           llt.compute( q_uu_reg_step[t] );
           if( llt.info() == Eigen::Success )
             break;
           q_uu_reg_step[t] += reg * identity_nu;
-          reg              *= 10.0;
+          reg              *= static_cast<Scalar>( 10 );
         }
         q_uu_inv_step[t] = llt.solve( identity_nu );
 
@@ -189,17 +204,17 @@ public:
             + k_matrix[t].transpose() * q_uu_step[t] * k[t];
         v_xx = q_xx_step[t] + k_matrix[t].transpose() * q_ux_step[t] + q_ux_step[t].transpose() * k_matrix[t]
              + k_matrix[t].transpose() * q_uu_step[t] * k_matrix[t];
-        v_xx = 0.5 * ( v_xx + v_xx.transpose() );
+        v_xx = static_cast<Scalar>( 0.5 ) * ( v_xx + v_xx.transpose() );
       }
 
       x_trial.setZero();
       u_trial.setZero();
       x_trial.col( 0 ) = problem.initial_state;
 
-      const double amin = 1e-3;
-      double       alpha = 1.0;
+      const Scalar amin = static_cast<Scalar>( 1e-3 );
+      Scalar       alpha = static_cast<Scalar>( 1 );
 
-      double            best_merit = current_merit;
+      Scalar            best_merit = current_merit;
       StateTrajectory   best_x     = x;
       ControlTrajectory best_u     = u;
 
@@ -207,16 +222,16 @@ public:
       {
         for( int t = 0; t < T; ++t )
         {
-          const Eigen::VectorXd dx = x_trial.col( t ) - x.col( t );
+          const Vector dx = x_trial.col( t ) - x.col( t );
           u_trial.col( t )         = u.col( t ) + alpha * k[t] + k_matrix[t] * dx;
 
           if( problem.input_lower_bounds && problem.input_upper_bounds )
-            clamp_controls( u_trial, *problem.input_lower_bounds, *problem.input_upper_bounds );
+            clamp_controls<Scalar>( u_trial, *problem.input_lower_bounds, *problem.input_upper_bounds );
 
-          x_trial.col( t + 1 ) = integrate_rk4( x_trial.col( t ), u_trial.col( t ), dt, problem.dynamics );
+          x_trial.col( t + 1 ) = integrate_rk4<Scalar>( x_trial.col( t ), u_trial.col( t ), dt, problem.dynamics );
         }
 
-        const double trial_merit = compute_merit( problem, x_trial, u_trial );
+        const Scalar trial_merit = compute_merit( problem, x_trial, u_trial );
         if( trial_merit < best_merit )
         {
           best_merit = trial_merit;
@@ -224,37 +239,39 @@ public:
           best_u     = u_trial;
           break;
         }
-        alpha *= 0.5;
+        alpha *= static_cast<Scalar>( 0.5 );
       }
 
-      const double improvement = current_merit - best_merit;
+      const Scalar improvement = current_merit - best_merit;
       x    = best_x;
       u    = best_u;
       cost = problem.objective_function( x, u );
       current_merit = best_merit;
 
-      double eq_violation_norm   = 0.0;
-      double ineq_violation_norm = 0.0;
+      Scalar eq_violation_norm   = static_cast<Scalar>( 0 );
+      Scalar ineq_violation_norm = static_cast<Scalar>( 0 );
 
       for( int t = 0; t < T; ++t )
       {
         if( equality_dim > 0 && problem.equality_constraints )
         {
-          const Eigen::VectorXd residual = problem.equality_constraints( x.col( t ), u.col( t ) );
+          const Vector residual = problem.equality_constraints( x.col( t ), u.col( t ) );
           eq_multipliers[t] += penalty_parameter * residual;
           eq_violation_norm += residual.squaredNorm();
         }
         if( inequality_dim > 0 && problem.inequality_constraints )
         {
-          const Eigen::VectorXd residual = problem.inequality_constraints( x.col( t ), u.col( t ) );
-          const Eigen::VectorXd positive = residual.cwiseMax( 0.0 );
-          ineq_multipliers[t]            = ( ineq_multipliers[t] + penalty_parameter * positive ).cwiseMax( 0.0 );
+          const Vector residual = problem.inequality_constraints( x.col( t ), u.col( t ) );
+          const Vector positive = residual.cwiseMax( static_cast<Scalar>( 0 ) );
+          ineq_multipliers[t]            = ( ineq_multipliers[t] + penalty_parameter * positive ).cwiseMax( static_cast<Scalar>( 0 ) );
           ineq_violation_norm += positive.squaredNorm();
         }
       }
 
-      eq_violation_norm   = std::sqrt( eq_violation_norm );
-      ineq_violation_norm = std::sqrt( ineq_violation_norm );
+      eq_violation_norm
+        = static_cast<Scalar>( std::sqrt( static_cast<double>( eq_violation_norm ) ) );
+      ineq_violation_norm
+        = static_cast<Scalar>( std::sqrt( static_cast<double>( ineq_violation_norm ) ) );
 
       if( eq_violation_norm > constraint_tolerance || ineq_violation_norm > constraint_tolerance )
         penalty_parameter *= penalty_increase;
@@ -266,8 +283,8 @@ public:
                   << '\n';
       }
 
-      if( improvement < tolerance && eq_violation_norm < constraint_tolerance
-          && ineq_violation_norm < constraint_tolerance )
+      if( static_cast<double>( std::abs( improvement ) ) < static_cast<double>( tolerance )
+          && eq_violation_norm < constraint_tolerance && ineq_violation_norm < constraint_tolerance )
         break;
     }
   }
@@ -275,7 +292,7 @@ public:
 private:
   //---------------- buffer management ----------------------------------//
   void
-  resize_buffers( const OCP& problem )
+  resize_buffers( const Problem& problem )
   {
     const int T  = problem.horizon_steps;
     const int nx = problem.state_dim;
@@ -289,27 +306,27 @@ private:
           m.setZero();
     };
 
-    resize_mat_vec( k, Eigen::VectorXd::Zero( nu ) );
-    resize_mat_vec( k_matrix, Eigen::MatrixXd::Zero( nu, nx ) );
+    resize_mat_vec( k, Vector::Zero( nu ) );
+    resize_mat_vec( k_matrix, Matrix::Zero( nu, nx ) );
 
-    resize_mat_vec( a_step, Eigen::MatrixXd::Zero( nx, nx ) );
-    resize_mat_vec( b_step, Eigen::MatrixXd::Zero( nx, nu ) );
-    resize_mat_vec( l_x_step, Eigen::VectorXd::Zero( nx ) );
-    resize_mat_vec( l_u_step, Eigen::VectorXd::Zero( nu ) );
-    resize_mat_vec( l_xx_step, Eigen::MatrixXd::Zero( nx, nx ) );
-    resize_mat_vec( l_uu_step, Eigen::MatrixXd::Zero( nu, nu ) );
-    resize_mat_vec( l_ux_step, Eigen::MatrixXd::Zero( nu, nx ) );
+    resize_mat_vec( a_step, Matrix::Zero( nx, nx ) );
+    resize_mat_vec( b_step, Matrix::Zero( nx, nu ) );
+    resize_mat_vec( l_x_step, Vector::Zero( nx ) );
+    resize_mat_vec( l_u_step, Vector::Zero( nu ) );
+    resize_mat_vec( l_xx_step, Matrix::Zero( nx, nx ) );
+    resize_mat_vec( l_uu_step, Matrix::Zero( nu, nu ) );
+    resize_mat_vec( l_ux_step, Matrix::Zero( nu, nx ) );
 
-    resize_mat_vec( q_x_step, Eigen::VectorXd::Zero( nx ) );
-    resize_mat_vec( q_u_step, Eigen::VectorXd::Zero( nu ) );
-    resize_mat_vec( q_xx_step, Eigen::MatrixXd::Zero( nx, nx ) );
-    resize_mat_vec( q_ux_step, Eigen::MatrixXd::Zero( nu, nx ) );
-    resize_mat_vec( q_uu_step, Eigen::MatrixXd::Zero( nu, nu ) );
-    resize_mat_vec( q_uu_reg_step, Eigen::MatrixXd::Zero( nu, nu ) );
-    resize_mat_vec( q_uu_inv_step, Eigen::MatrixXd::Zero( nu, nu ) );
+    resize_mat_vec( q_x_step, Vector::Zero( nx ) );
+    resize_mat_vec( q_u_step, Vector::Zero( nu ) );
+    resize_mat_vec( q_xx_step, Matrix::Zero( nx, nx ) );
+    resize_mat_vec( q_ux_step, Matrix::Zero( nu, nx ) );
+    resize_mat_vec( q_uu_step, Matrix::Zero( nu, nu ) );
+    resize_mat_vec( q_uu_reg_step, Matrix::Zero( nu, nu ) );
+    resize_mat_vec( q_uu_inv_step, Matrix::Zero( nu, nu ) );
 
     if( static_cast<int>( llt_step.size() ) != T )
-      llt_step.assign( T, Eigen::LLT<Eigen::MatrixXd>( nu ) );
+      llt_step.assign( T, LLT( nu ) );
 
     Control default_control = Control::Zero( nu );
     if( problem.initial_controls.cols() == T )
@@ -324,17 +341,17 @@ private:
 
     if( equality_dim > 0 )
     {
-      resize_mat_vec( eq_residuals, Eigen::VectorXd::Zero( equality_dim ) );
-      resize_mat_vec( eq_jacobian_x, Eigen::MatrixXd::Zero( equality_dim, nx ) );
-      resize_mat_vec( eq_jacobian_u, Eigen::MatrixXd::Zero( equality_dim, nu ) );
+      resize_mat_vec( eq_residuals, Vector::Zero( equality_dim ) );
+      resize_mat_vec( eq_jacobian_x, Matrix::Zero( equality_dim, nx ) );
+      resize_mat_vec( eq_jacobian_u, Matrix::Zero( equality_dim, nu ) );
 
       if( static_cast<int>( eq_multipliers.size() ) != T )
-        eq_multipliers.assign( T, Eigen::VectorXd::Zero( equality_dim ) );
+        eq_multipliers.assign( T, Vector::Zero( equality_dim ) );
       else
         for( auto& m : eq_multipliers )
         {
           if( m.size() != equality_dim )
-            m = Eigen::VectorXd::Zero( equality_dim );
+            m = Vector::Zero( equality_dim );
         }
     }
     else
@@ -347,17 +364,17 @@ private:
 
     if( inequality_dim > 0 )
     {
-      resize_mat_vec( ineq_residuals, Eigen::VectorXd::Zero( inequality_dim ) );
-      resize_mat_vec( ineq_jacobian_x, Eigen::MatrixXd::Zero( inequality_dim, nx ) );
-      resize_mat_vec( ineq_jacobian_u, Eigen::MatrixXd::Zero( inequality_dim, nu ) );
+      resize_mat_vec( ineq_residuals, Vector::Zero( inequality_dim ) );
+      resize_mat_vec( ineq_jacobian_x, Matrix::Zero( inequality_dim, nx ) );
+      resize_mat_vec( ineq_jacobian_u, Matrix::Zero( inequality_dim, nu ) );
 
       if( static_cast<int>( ineq_multipliers.size() ) != T )
-        ineq_multipliers.assign( T, Eigen::VectorXd::Zero( inequality_dim ) );
+        ineq_multipliers.assign( T, Vector::Zero( inequality_dim ) );
       else
         for( auto& m : ineq_multipliers )
         {
           if( m.size() != inequality_dim )
-            m = Eigen::VectorXd::Zero( inequality_dim );
+            m = Vector::Zero( inequality_dim );
         }
     }
     else
@@ -373,33 +390,33 @@ private:
 
     v_x.resize( nx );
     v_xx.resize( nx, nx );
-    identity_nu = Eigen::MatrixXd::Identity( nu, nu );
+    identity_nu = Matrix::Identity( nu, nu );
   }
 
-  double
-  compute_merit( const OCP& problem, const StateTrajectory& states, const ControlTrajectory& controls ) const
+  Scalar
+  compute_merit( const Problem& problem, const StateTrajectory& states, const ControlTrajectory& controls ) const
   {
     const int T = problem.horizon_steps;
-    double    merit
-      = problem.objective_function ? problem.objective_function( states, controls ) : problem.best_cost;
+    Scalar merit = problem.objective_function ? problem.objective_function( states, controls ) : problem.best_cost;
 
     for( int t = 0; t < T; ++t )
     {
       if( equality_dim > 0 && problem.equality_constraints )
       {
-        const Eigen::VectorXd residual = problem.equality_constraints( states.col( t ), controls.col( t ) );
-        merit += eq_multipliers[t].dot( residual ) + 0.5 * penalty_parameter * residual.squaredNorm();
+        const Vector residual = problem.equality_constraints( states.col( t ), controls.col( t ) );
+        merit += eq_multipliers[t].dot( residual )
+                 + static_cast<Scalar>( 0.5 ) * penalty_parameter * residual.squaredNorm();
       }
       if( inequality_dim > 0 && problem.inequality_constraints )
       {
-        const Eigen::VectorXd residual = problem.inequality_constraints( states.col( t ), controls.col( t ) );
-        const Eigen::VectorXd slack    = residual.cwiseMax( 0.0 );
-        const Eigen::ArrayXd   active
-          = ( residual.array() > -inequality_activation_tolerance ).cast<double>();
-        const Eigen::VectorXd active_slack      = slack.array() * active;
-        const Eigen::VectorXd weighted_multiply = ineq_multipliers[t].array() * active;
+        const Vector residual = problem.inequality_constraints( states.col( t ), controls.col( t ) );
+        const Vector slack    = residual.cwiseMax( static_cast<Scalar>( 0 ) );
+        const Array  active
+          = ( residual.array() > -inequality_activation_tolerance ).template cast<Scalar>();
+        const Vector active_slack      = slack.array() * active;
+        const Vector weighted_multiply = ineq_multipliers[t].array() * active;
         merit += weighted_multiply.dot( active_slack );
-        merit += 0.5 * penalty_parameter * active_slack.squaredNorm();
+        merit += static_cast<Scalar>( 0.5 ) * penalty_parameter * active_slack.squaredNorm();
       }
     }
 
@@ -408,56 +425,59 @@ private:
 
   //---------------- data members ---------------------------------------//
   int    max_iterations;
-  double tolerance;
-  double max_ms;
+  Scalar tolerance;
+  Scalar max_ms;
   bool   debug;
 
-  double penalty_parameter;
-  double penalty_increase;
-  double constraint_tolerance;
-  double inequality_activation_tolerance;
+  Scalar penalty_parameter;
+  Scalar penalty_increase;
+  Scalar constraint_tolerance;
+  Scalar inequality_activation_tolerance;
 
   int equality_dim;
   int inequality_dim;
 
-  std::vector<Eigen::VectorXd> k;
-  std::vector<Eigen::MatrixXd> k_matrix;
+  std::vector<Vector> k;
+  std::vector<Matrix> k_matrix;
 
-  std::vector<Eigen::MatrixXd> a_step;
-  std::vector<Eigen::MatrixXd> b_step;
+  std::vector<Matrix> a_step;
+  std::vector<Matrix> b_step;
 
-  std::vector<Eigen::VectorXd> l_x_step;
-  std::vector<Eigen::VectorXd> l_u_step;
-  std::vector<Eigen::MatrixXd> l_xx_step;
-  std::vector<Eigen::MatrixXd> l_uu_step;
-  std::vector<Eigen::MatrixXd> l_ux_step;
+  std::vector<Vector> l_x_step;
+  std::vector<Vector> l_u_step;
+  std::vector<Matrix> l_xx_step;
+  std::vector<Matrix> l_uu_step;
+  std::vector<Matrix> l_ux_step;
 
-  std::vector<Eigen::VectorXd> q_x_step;
-  std::vector<Eigen::VectorXd> q_u_step;
-  std::vector<Eigen::MatrixXd> q_xx_step;
-  std::vector<Eigen::MatrixXd> q_ux_step;
-  std::vector<Eigen::MatrixXd> q_uu_step;
-  std::vector<Eigen::MatrixXd> q_uu_reg_step;
-  std::vector<Eigen::MatrixXd> q_uu_inv_step;
+  std::vector<Vector> q_x_step;
+  std::vector<Vector> q_u_step;
+  std::vector<Matrix> q_xx_step;
+  std::vector<Matrix> q_ux_step;
+  std::vector<Matrix> q_uu_step;
+  std::vector<Matrix> q_uu_reg_step;
+  std::vector<Matrix> q_uu_inv_step;
 
-  std::vector<Eigen::LLT<Eigen::MatrixXd>> llt_step;
+  std::vector<LLT> llt_step;
 
-  std::vector<Eigen::VectorXd> eq_residuals;
-  std::vector<Eigen::MatrixXd> eq_jacobian_x;
-  std::vector<Eigen::MatrixXd> eq_jacobian_u;
-  std::vector<Eigen::VectorXd> eq_multipliers;
+  std::vector<Vector> eq_residuals;
+  std::vector<Matrix> eq_jacobian_x;
+  std::vector<Matrix> eq_jacobian_u;
+  std::vector<Vector> eq_multipliers;
 
-  std::vector<Eigen::VectorXd> ineq_residuals;
-  std::vector<Eigen::MatrixXd> ineq_jacobian_x;
-  std::vector<Eigen::MatrixXd> ineq_jacobian_u;
-  std::vector<Eigen::VectorXd> ineq_multipliers;
+  std::vector<Vector> ineq_residuals;
+  std::vector<Matrix> ineq_jacobian_x;
+  std::vector<Matrix> ineq_jacobian_u;
+  std::vector<Vector> ineq_multipliers;
 
   StateTrajectory   x_trial;
   ControlTrajectory u_trial;
 
-  Eigen::VectorXd v_x;
-  Eigen::MatrixXd v_xx;
-  Eigen::MatrixXd identity_nu;
+  Vector v_x;
+  Matrix v_xx;
+  Matrix identity_nu;
 };
+
+using iLQRd = iLQR<double>;
+using iLQRf = iLQR<float>;
 
 } // namespace mas

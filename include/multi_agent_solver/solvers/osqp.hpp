@@ -2,18 +2,22 @@
 #pragma once
 
 #include <chrono>
+#include <iostream>
 #include <map>
 #include <memory>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 
-#include "multi_agent_solver/integrator.hpp"
-#include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/solver.hpp"
-#include "multi_agent_solver/types.hpp"
 #include <OsqpEigen/OsqpEigen.h>
+
+#include "multi_agent_solver/integrator.hpp"
+#include "multi_agent_solver/line_search.hpp"
+#include "multi_agent_solver/ocp.hpp"
+#include "multi_agent_solver/types.hpp"
 
 namespace mas
 {
@@ -30,9 +34,19 @@ namespace mas
  * matrices instead of reallocating.
  *
  */
+template<typename Scalar = double>
 class OSQP
 {
 public:
+  static_assert( std::is_same_v<Scalar, double>, "OSQP backend currently supports only double precision" );
+
+  using ScalarType        = Scalar;
+  using StateTrajectory   = StateTrajectoryT<Scalar>;
+  using ControlTrajectory = ControlTrajectoryT<Scalar>;
+  using MotionModel       = MotionModelT<Scalar>;
+  using ObjectiveFunction = ObjectiveFunctionT<Scalar>;
+  using SolverParams      = SolverParamsT<Scalar>;
+  using Problem           = OCP<Scalar>;
 
   explicit OSQP()
   {
@@ -45,7 +59,7 @@ public:
     max_iterations = static_cast<int>( params.at( "max_iterations" ) );
     tolerance      = params.at( "tolerance" );
     max_ms         = params.at( "max_ms" );
-    debug          = params.count( "debug" ) && params.at( "debug" ) > 0.5;
+    debug          = params.count( "debug" ) && params.at( "debug" ) > static_cast<Scalar>( 0.5 );
     solver->settings()->setWarmStart( true );
     solver->settings()->setVerbosity( false );
     solver->settings()->setAdaptiveRho( true );
@@ -60,7 +74,7 @@ public:
    *        Reuses all pre-allocated memory across calls.
    */
   void
-  solve( OCP& problem )
+  solve( Problem& problem )
   {
     using clock      = std::chrono::high_resolution_clock;
     const auto start = clock::now();
@@ -76,14 +90,15 @@ public:
 
     StateTrajectory&   states   = problem.best_states;
     ControlTrajectory& controls = problem.best_controls;
-    double&            cost     = problem.best_cost;
+    Scalar&            cost     = problem.best_cost;
 
 
-    states = integrate_horizon( problem.initial_state, controls, problem.dt, problem.dynamics, integrate_rk4 );
+    states = integrate_horizon<Scalar>( problem.initial_state, controls, problem.dt, problem.dynamics,
+                                        integrate_rk4<Scalar> );
     cost   = problem.objective_function( states, controls );
 
 
-    double reg = 0.0;
+    Scalar reg = static_cast<Scalar>( 0 );
     assemble_qp_data( problem, states, controls, reg );
 
 
@@ -113,16 +128,17 @@ public:
 
     if( ls_parameters.empty() )
       ls_parameters = {
-        { "initial_step_size",  1.0 },
-        {              "beta",  0.5 },
-        {                "c1", 1e-6 }
+        { "initial_step_size", static_cast<Scalar>( 1.0 ) },
+        {              "beta", static_cast<Scalar>( 0.5 ) },
+        {                "c1", static_cast<Scalar>( 1e-6 ) }
       };
 
     //--------------------------------------------------------------------//
     for( int iter = 0; iter < max_iterations; ++iter )
     {
-      const double elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count();
-      if( elapsed_ms > max_ms )
+      const double elapsed_ms
+        = static_cast<double>( std::chrono::duration_cast<std::chrono::milliseconds>( clock::now() - start ).count() );
+      if( elapsed_ms > static_cast<double>( max_ms ) )
       {
         if( debug )
         {
@@ -167,14 +183,15 @@ public:
 
       d_u = controls - u_candidate;
 
-      const double alpha = armijo_line_search( problem.initial_state, controls, d_u, problem.dynamics, problem.objective_function,
-                                               problem.dt, ls_parameters );
+      const Scalar alpha = armijo_line_search<Scalar>( problem.initial_state, controls, d_u, problem.dynamics,
+                                                       problem.objective_function, problem.dt, ls_parameters );
 
-      u_new                 = controls - alpha * d_u;
-      states_new            = integrate_horizon( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4 );
-      const double cost_new = problem.objective_function( states_new, u_new );
+      u_new = controls - alpha * d_u;
+      states_new
+        = integrate_horizon<Scalar>( problem.initial_state, u_new, problem.dt, problem.dynamics, integrate_rk4<Scalar> );
+      const Scalar cost_new = problem.objective_function( states_new, u_new );
 
-      if( std::abs( cost - cost_new ) < tolerance )
+      if( std::abs( static_cast<double>( cost - cost_new ) ) < static_cast<double>( tolerance ) )
       {
         controls = u_new;
         states   = states_new;
@@ -227,11 +244,11 @@ private:
   StateTrajectory   states_new;
 
 
-  std::map<std::string, double> ls_parameters;
+  std::map<std::string, Scalar> ls_parameters;
 
   //--------------------------------------------------------------------//
   void
-  resize_buffers( const OCP& problem )
+  resize_buffers( const Problem& problem )
   {
     const int T  = problem.horizon_steps;
     const int nx = problem.state_dim;
@@ -259,7 +276,7 @@ private:
 
   //--------------------------------------------------------------------//
   void
-  assemble_qp_data( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u, double reg )
+  assemble_qp_data( const Problem& p, const StateTrajectory& x, const ControlTrajectory& u, Scalar reg )
   {
     assemble_hessian( p, x, u, reg );
     assemble_gradient( p, x, u );
@@ -269,7 +286,7 @@ private:
 
   //--------------------------------------------------------------------//
   void
-  assemble_hessian( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u, double reg )
+  assemble_hessian( const Problem& p, const StateTrajectory& x, const ControlTrajectory& u, Scalar reg )
   {
 
 
@@ -312,7 +329,7 @@ private:
 
   //--------------------------------------------------------------------//
   void
-  assemble_gradient( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u )
+  assemble_gradient( const Problem& p, const StateTrajectory& x, const ControlTrajectory& u )
   {
     const int nx = p.state_dim;
     const int nu = p.control_dim;
@@ -331,7 +348,7 @@ private:
 
   //--------------------------------------------------------------------//
   void
-  assemble_constraints( const OCP& p, const StateTrajectory& x, const ControlTrajectory& u )
+  assemble_constraints( const Problem& p, const StateTrajectory& x, const ControlTrajectory& u )
   {
     const int nx = p.state_dim;
     const int nu = p.control_dim;
@@ -377,7 +394,7 @@ private:
 
   //--------------------------------------------------------------------//
   void
-  assemble_bounds( const OCP& p )
+  assemble_bounds( const Problem& p )
   {
     const int nx = p.state_dim;
     const int nu = p.control_dim;
@@ -410,9 +427,11 @@ private:
   //--------------------------------------------------------------------//
 
   int    max_iterations;
-  double tolerance;
-  double max_ms;
+  Scalar tolerance;
+  Scalar max_ms;
   bool   debug;
 };
+
+using OSQPd = OSQP<double>;
 
 } // namespace mas

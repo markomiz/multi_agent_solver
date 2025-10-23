@@ -10,12 +10,26 @@
 namespace mas
 {
 
-using Strategy = std::variant<CentralizedStrategy, SequentialNashStrategy, LineSearchNashStrategy, TrustRegionNashStrategy>;
+template<typename Scalar = double>
+using StrategyT
+  = std::variant<CentralizedStrategy<Scalar>, SequentialNashStrategy<Scalar>, LineSearchNashStrategy<Scalar>,
+                 TrustRegionNashStrategy<Scalar>>;
+
+using Strategy  = StrategyT<double>;
+using Strategyd = StrategyT<double>;
+using Strategyf = StrategyT<float>;
+
+template<typename Scalar>
+inline SolutionT<Scalar>
+solve( StrategyT<Scalar>& strategy, MultiAgentProblemT<Scalar>& problem )
+{
+  return std::visit( [&]( auto& s ) { return s( problem ); }, strategy );
+}
 
 inline Solution
 solve( Strategy& strategy, MultiAgentProblem& problem )
 {
-  return std::visit( [&]( auto& s ) { return s( problem ); }, strategy );
+  return solve<double>( strategy, problem );
 }
 
 } // namespace mas

@@ -74,6 +74,27 @@ Docker builds).
 ./scripts/run.sh
 ```
 
+Every executable now evaluates all supported solver/strategy combinations for both `float` and `double` problem instances by
+default. The command-line flags allow you to focus on a subset:
+
+```bash
+# Only run double-precision OSQP for the rocket example and print trajectories
+./build/release/rocket_max_altitude --solvers osqp --scalars double --dump
+
+# Compare iLQR and CGD for single-track coordination without trajectories
+./build/release/multi_agent_single_track --solvers ilqr,cgd --strategies centralized,sequential --max-outer 5
+```
+
+The output now contains a concise summary line for each run. For example:
+
+```
+scalar=float solver=ilqr strategy=centralized agents=4 cost=9.128435 time_ms=0.713421
+scalar=double solver=ilqr strategy=centralized agents=4 cost=9.128431 time_ms=0.926587
+scalar=double solver=osqp strategy=centralized agents=4 unsupported (skipping)
+```
+
+Use `--dump-trajectories` on any executable to restore the CSV-style trajectory printouts for the evaluated configurations.
+
 ### **Utility scripts**
 
 The repository includes Python helpers for benchmarking and visualising the example executables. Both scripts accept `--help` for the full list of options.
@@ -115,44 +136,6 @@ The repository includes Python helpers for benchmarking and visualising the exam
 ```
 
 
-
-## Results
-
-Times and costs for different methods in the example code:
-```
-🚗 Single-Track Lane Following Test 🚗
----------------------------------------------
-Solver              Cost           Time (ms)
-     ---------------------------------------------
-CGD                 24.0465        20.6444        
-OSQP                30.1889        2.33275        
-OSQP Collocation    23.9809        5.11993        
-iLQR                24.4039        1.06887 
-```
-
-```
-
-Multi-Agent Single Track Test
-
-Method                                  Cost           Time (ms)      
-----------------------------------------------------------------------
-Centralized CGD                         7928.151       1214.919       
-Centralized iLQR                        7928.501       135.472        
-Centralized OSQP                        7929.011       285.711        
-Centralized OSQP-collocation            7929.392       1071.582       
-Nash Sequential CGD                     7928.153       26.612         
-Nash Sequential iLQR                    7928.327       11.053         
-Nash Sequential OSQP                    7928.384       38.514         
-Nash Sequential OSQP-collocation        7928.158       2098.299       
-Nash LineSearch CGD                     7928.153       27.597         
-Nash LineSearch iLQR                    7928.327       13.807         
-Nash LineSearch OSQP                    7928.384       40.643         
-Nash LineSearch OSQP-collocation        7928.152       2010.733       
-Nash TrustRegion CGD                    7928.153       34.767         
-Nash TrustRegion iLQR                   7928.199       14.093         
-Nash TrustRegion OSQP                   7928.417       46.087         
-Nash TrustRegion OSQP-collocation       7928.152       1596.460 
-```
 
 ## License
 Apache 2.0

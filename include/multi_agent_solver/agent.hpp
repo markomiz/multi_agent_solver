@@ -6,12 +6,17 @@
 namespace mas
 {
 
-struct Agent
+template<typename Scalar = double>
+struct AgentBase
 {
-  std::size_t          id;
-  std::shared_ptr<OCP> ocp;
+  using ScalarType = Scalar;
+  using OCPType    = OCP<Scalar>;
+  using OCPPtr     = std::shared_ptr<OCPType>;
 
-  Agent( std::size_t id_, std::shared_ptr<OCP> ocp_ ) :
+  std::size_t id;
+  OCPPtr      ocp;
+
+  AgentBase( std::size_t id_, OCPPtr ocp_ ) :
     id( id_ ),
     ocp( std::move( ocp_ ) )
   {}
@@ -41,6 +46,18 @@ struct Agent
   }
 };
 
-using AgentPtr = std::shared_ptr<Agent>;
+template<typename Scalar>
+using AgentPtrT = std::shared_ptr<AgentBase<Scalar>>;
+
+template<typename Scalar = double>
+using AgentT = AgentBase<Scalar>;
+
+using Agentd = AgentBase<double>;
+using Agentf = AgentBase<float>;
+using Agent  = Agentd;
+
+using AgentPtr  = AgentPtrT<double>;
+using AgentPtrd = AgentPtrT<double>;
+using AgentPtrf = AgentPtrT<float>;
 
 } // namespace mas

@@ -67,6 +67,12 @@ def parse_arguments(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         help="Solvers to test. Names are passed directly to the executables.",
     )
     parser.add_argument(
+        "--scalars",
+        nargs="+",
+        default=["float", "double"],
+        help="Scalar precisions to benchmark. Names are passed directly to the executables.",
+    )
+    parser.add_argument(
         "--strategies",
         nargs="+",
         default=["centralized", "sequential", "linesearch", "trustregion"],
@@ -171,17 +177,18 @@ def format_table(rows: List[Dict[str, str]], include_strategy: bool) -> str:
         except ValueError:
             return value
 
-    headers = ["solver"]
+    headers = ["scalar", "solver"]
     if include_strategy:
         headers.append("strategy")
     headers.extend(["cost", "time_ms"])
 
     display_rows: List[List[str]] = []
     for row in rows:
+        scalar = row.get("scalar", "")
         solver = row.get("solver", "")
         cost = fmt_float(row.get("cost", ""))
         time_ms = fmt_float(row.get("time_ms", ""))
-        values = [solver]
+        values = [scalar, solver]
         if include_strategy:
             values.append(row.get("strategy", ""))
         values.extend([cost, time_ms])
@@ -230,19 +237,58 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             continue
 
         if example in MULTI_AGENT_EXAMPLES:
-            for solver in args.solvers:
-                for strategy in args.strategies:
+            for scalar in args.scalars:
+                for solver in args.solvers:
+                    for strategy in args.strategies:
+                        cmd = [
+                            str(executable),
+                            f"--solver={solver}",
+                            f"--strategy={strategy}",
+                            f"--agents={args.agents}",
+                            f"--max-outer={args.max_outer}",
+                            f"--scalar={scalar}",
+                        ]
+                        result = run_command(cmd, args.timeout, args.verbose)
+                        if result.returncode != 0:
+                            sys.stderr.write(
+                                f"Error: '{example}' with solver={solver} strategy={strategy} scalar={scalar} exited with code {result.returncode}.\n"
+                            )
+                            if result.stderr:
+                                sys.stderr.write(result.stderr + "\n")
+                            if args.fail_fast:
+                                return result.returncode or 1
+                            continue
+                        line = find_result_line(result.stdout)
+                        if not line:
+                            if "unsupported" in result.stdout:
+                                if args.verbose:
+                                    print(
+                                        f"Skipping {example} solver={solver} strategy={strategy} scalar={scalar}: unsupported"
+                                    )
+                                continue
+                            sys.stderr.write(
+                                f"Error: could not parse output from '{example}' with solver={solver} strategy={strategy} scalar={scalar}.\n"
+                            )
+                            if args.fail_fast:
+                                return 1
+                            continue
+                        data = parse_result_line(line)
+                        data.setdefault("scalar", scalar)
+                        data.setdefault("solver", solver)
+                        data.setdefault("strategy", strategy)
+                        results[example].append(data)
+        else:
+            for scalar in args.scalars:
+                for solver in args.solvers:
                     cmd = [
                         str(executable),
                         f"--solver={solver}",
-                        f"--strategy={strategy}",
-                        f"--agents={args.agents}",
-                        f"--max-outer={args.max_outer}",
+                        f"--scalar={scalar}",
                     ]
                     result = run_command(cmd, args.timeout, args.verbose)
                     if result.returncode != 0:
                         sys.stderr.write(
-                            f"Error: '{example}' with solver={solver} strategy={strategy} exited with code {result.returncode}.\n"
+                            f"Error: '{example}' with solver={solver} scalar={scalar} exited with code {result.returncode}.\n"
                         )
                         if result.stderr:
                             sys.stderr.write(result.stderr + "\n")
@@ -251,40 +297,22 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         continue
                     line = find_result_line(result.stdout)
                     if not line:
+                        if "unsupported" in result.stdout:
+                            if args.verbose:
+                                print(
+                                    f"Skipping {example} solver={solver} scalar={scalar}: unsupported"
+                                )
+                            continue
                         sys.stderr.write(
-                            f"Error: could not parse output from '{example}' with solver={solver} strategy={strategy}.\n"
+                            f"Error: could not parse output from '{example}' with solver={solver} scalar={scalar}.\n"
                         )
                         if args.fail_fast:
                             return 1
                         continue
                     data = parse_result_line(line)
+                    data.setdefault("scalar", scalar)
                     data.setdefault("solver", solver)
-                    data.setdefault("strategy", strategy)
                     results[example].append(data)
-        else:
-            for solver in args.solvers:
-                cmd = [str(executable), f"--solver={solver}"]
-                result = run_command(cmd, args.timeout, args.verbose)
-                if result.returncode != 0:
-                    sys.stderr.write(
-                        f"Error: '{example}' with solver={solver} exited with code {result.returncode}.\n"
-                    )
-                    if result.stderr:
-                        sys.stderr.write(result.stderr + "\n")
-                    if args.fail_fast:
-                        return result.returncode or 1
-                    continue
-                line = find_result_line(result.stdout)
-                if not line:
-                    sys.stderr.write(
-                        f"Error: could not parse output from '{example}' with solver={solver}.\n"
-                    )
-                    if args.fail_fast:
-                        return 1
-                    continue
-                data = parse_result_line(line)
-                data.setdefault("solver", solver)
-                results[example].append(data)
 
     for example in args.examples:
         rows = results.get(example, [])

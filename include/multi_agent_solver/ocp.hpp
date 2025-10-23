@@ -1,6 +1,8 @@
-
 #pragma once
+
+#include <cassert>
 #include <functional>
+#include <limits>
 #include <optional>
 
 #include <Eigen/Dense>
@@ -11,24 +13,55 @@
 namespace mas
 {
 
-inline double
-compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, const StageCostFunction& stage_cost,
-                         const TerminalCostFunction& terminal_cost )
+template<typename Scalar>
+inline Scalar
+compute_trajectory_cost( const StateTrajectoryT<Scalar>& X, const ControlTrajectoryT<Scalar>& U,
+                         const StageCostFunctionT<Scalar>& stage_cost, const TerminalCostFunctionT<Scalar>& terminal_cost )
 {
-  int T   = U.cols();
-  int Tp1 = X.cols();
+  const int T   = U.cols();
+  const int Tp1 = X.cols();
 
-  double cost = 0.0;
+  Scalar cost = static_cast<Scalar>( 0 );
   for( int t = 0; t < T; ++t )
   {
-    cost += stage_cost( X.col( t ), U.col( t ), t );
+    cost += stage_cost( X.col( t ), U.col( t ), static_cast<size_t>( t ) );
   }
   cost += terminal_cost( X.col( Tp1 - 1 ) );
   return cost;
 }
 
+inline double
+compute_trajectory_cost( const StateTrajectory& X, const ControlTrajectory& U, const StageCostFunction& stage_cost,
+                         const TerminalCostFunction& terminal_cost )
+{
+  return compute_trajectory_cost<double>( X, U, stage_cost, terminal_cost );
+}
+
+template<typename Scalar = double>
 struct OCP
 {
+  using ScalarType             = Scalar;
+  using State                  = StateT<Scalar>;
+  using StateDerivative        = StateDerivativeT<Scalar>;
+  using Control                = ControlT<Scalar>;
+  using StateTrajectory        = StateTrajectoryT<Scalar>;
+  using ControlTrajectory      = ControlTrajectoryT<Scalar>;
+  using MotionModel            = MotionModelT<Scalar>;
+  using ObjectiveFunction      = ObjectiveFunctionT<Scalar>;
+  using StageCostFunction      = StageCostFunctionT<Scalar>;
+  using TerminalCostFunction   = TerminalCostFunctionT<Scalar>;
+  using ConstraintsFunction    = ConstraintsFunctionT<Scalar>;
+  using ConstraintsJacobianFunction = ConstraintsJacobianFunctionT<Scalar>;
+  using ConstraintViolations        = ConstraintViolationsT<Scalar>;
+  using DynamicsStateJacobian       = DynamicsStateJacobianT<Scalar>;
+  using DynamicsControlJacobian     = DynamicsControlJacobianT<Scalar>;
+  using CostStateGradient           = CostStateGradientT<Scalar>;
+  using CostControlGradient         = CostControlGradientT<Scalar>;
+  using CostStateHessian            = CostStateHessianT<Scalar>;
+  using CostControlHessian          = CostControlHessianT<Scalar>;
+  using CostCrossTerm               = CostCrossTermT<Scalar>;
+  using TerminalCostGradient        = TerminalCostGradientT<Scalar>;
+  using TerminalCostHessian         = TerminalCostHessianT<Scalar>;
 
   // intial guess and output
   StateTrajectory   initial_states;
@@ -36,21 +69,22 @@ struct OCP
 
   StateTrajectory   best_states;
   ControlTrajectory best_controls;
-  double            best_cost = std::numeric_limits<double>::max();
+  Scalar            best_cost = std::numeric_limits<Scalar>::max();
 
   // Dynamics and Objective
   State       initial_state;
   MotionModel dynamics;
 
-  StageCostFunction    stage_cost    = []( const State&, const Control&, size_t ) { return 0.0; };
-  TerminalCostFunction terminal_cost = []( const State& ) { return 0.0; };
+  StageCostFunction    stage_cost
+    = []( const State&, const Control&, size_t ) { return static_cast<Scalar>( 0 ); };
+  TerminalCostFunction terminal_cost = []( const State& ) { return static_cast<Scalar>( 0 ); };
   // objective function is sum of all stage costs + terminal cost
   ObjectiveFunction objective_function;
 
   int    control_dim   = 0;
   int    state_dim     = 0;
   int    horizon_steps = 0;
-  double dt;
+  Scalar dt            = static_cast<Scalar>( 0 );
 
   // Static bounds
   std::optional<State>   state_lower_bounds = std::nullopt;
@@ -84,7 +118,8 @@ struct OCP
   reset()
   {
     initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
-    initial_states   = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
+    initial_states
+      = integrate_horizon<Scalar>( initial_state, initial_controls, dt, dynamics, integrate_rk4<Scalar> );
 
     best_states   = initial_states;
     best_controls = initial_controls;
@@ -107,7 +142,7 @@ struct OCP
     {
       initial_controls = ControlTrajectory::Zero( control_dim, horizon_steps );
     }
-    initial_states = integrate_horizon( initial_state, initial_controls, dt, dynamics, integrate_rk4 );
+    initial_states = integrate_horizon<Scalar>( initial_state, initial_controls, dt, dynamics, integrate_rk4<Scalar> );
 
     best_states   = initial_states;
     best_controls = initial_controls;
@@ -115,24 +150,24 @@ struct OCP
 
     // use finite differences when derivatives are not specified
     if( !dynamics_state_jacobian )
-      dynamics_state_jacobian = compute_dynamics_state_jacobian;
+      dynamics_state_jacobian = compute_dynamics_state_jacobian<Scalar>;
     if( !dynamics_control_jacobian )
-      dynamics_control_jacobian = compute_dynamics_control_jacobian;
+      dynamics_control_jacobian = compute_dynamics_control_jacobian<Scalar>;
     if( !cost_state_gradient )
-      cost_state_gradient = compute_cost_state_gradient;
+      cost_state_gradient = compute_cost_state_gradient<Scalar>;
     if( !cost_control_gradient )
-      cost_control_gradient = compute_cost_control_gradient;
+      cost_control_gradient = compute_cost_control_gradient<Scalar>;
     if( !cost_state_hessian )
-      cost_state_hessian = compute_cost_state_hessian;
+      cost_state_hessian = compute_cost_state_hessian<Scalar>;
     if( !cost_control_hessian )
-      cost_control_hessian = compute_cost_control_hessian;
+      cost_control_hessian = compute_cost_control_hessian<Scalar>;
     if( !cost_cross_term )
-      cost_cross_term = compute_cost_cross_term;
+      cost_cross_term = compute_cost_cross_term<Scalar>;
 
     if( !terminal_cost_gradient )
-      terminal_cost_gradient = compute_terminal_cost_gradient;
+      terminal_cost_gradient = compute_terminal_cost_gradient<Scalar>;
     if( !terminal_cost_hessian )
-      terminal_cost_hessian = compute_terminal_cost_hessian;
+      terminal_cost_hessian = compute_terminal_cost_hessian<Scalar>;
 
     if( equality_constraints )
     {
@@ -140,14 +175,14 @@ struct OCP
       {
         auto equality_fn = equality_constraints;
         equality_constraints_state_jacobian = [equality_fn]( const State& state, const Control& control ) {
-          return compute_constraints_state_jacobian( equality_fn, state, control );
+          return compute_constraints_state_jacobian<Scalar>( equality_fn, state, control );
         };
       }
       if( !equality_constraints_control_jacobian )
       {
         auto equality_fn = equality_constraints;
         equality_constraints_control_jacobian = [equality_fn]( const State& state, const Control& control ) {
-          return compute_constraints_control_jacobian( equality_fn, state, control );
+          return compute_constraints_control_jacobian<Scalar>( equality_fn, state, control );
         };
       }
     }
@@ -158,14 +193,14 @@ struct OCP
       {
         auto inequality_fn = inequality_constraints;
         inequality_constraints_state_jacobian = [inequality_fn]( const State& state, const Control& control ) {
-          return compute_constraints_state_jacobian( inequality_fn, state, control );
+          return compute_constraints_state_jacobian<Scalar>( inequality_fn, state, control );
         };
       }
       if( !inequality_constraints_control_jacobian )
       {
         auto inequality_fn = inequality_constraints;
         inequality_constraints_control_jacobian = [inequality_fn]( const State& state, const Control& control ) {
-          return compute_constraints_control_jacobian( inequality_fn, state, control );
+          return compute_constraints_control_jacobian<Scalar>( inequality_fn, state, control );
         };
       }
     }
@@ -174,9 +209,9 @@ struct OCP
     {
       auto stage_cost_local    = stage_cost;
       auto terminal_cost_local = terminal_cost;
-      objective_function       = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,
-                                                                    const ControlTrajectory& controls ) -> double {
-        return compute_trajectory_cost( states, controls, stage_cost_local, terminal_cost_local );
+      objective_function = [stage_cost_local, terminal_cost_local]( const StateTrajectory&   states,
+                                                                    const ControlTrajectory& controls ) -> Scalar {
+        return compute_trajectory_cost<Scalar>( states, controls, stage_cost_local, terminal_cost_local );
       };
     }
     best_cost = objective_function( initial_states, initial_controls );
@@ -189,7 +224,7 @@ struct OCP
     assert( state_dim != 0 && "No state dimension" );
     assert( control_dim != 0 && "No control dimension" );
     assert( horizon_steps != 0 && "No horizon dimension" );
-    assert( dt != 0.0 && "dt is 0.0" );
+    assert( dt != static_cast<Scalar>( 0 ) && "dt is 0.0" );
 
     assert( initial_state.size() == state_dim && "Initial state size does not match state dimension" );
 
@@ -218,7 +253,8 @@ struct OCP
     assert( dynamics_output.size() == state_dim && "Dynamics output size mismatch" );
 
     // Test objective function
-    double cost = objective_function( best_states, best_controls );
+    Scalar cost = objective_function( best_states, best_controls );
+    (void)cost;
 
     // If constraints exist, test them
     if( inequality_constraints )
@@ -235,4 +271,8 @@ struct OCP
     return true;
   }
 };
+
+using OCPd = OCP<double>;
+using OCPf = OCP<float>;
+
 } // namespace mas

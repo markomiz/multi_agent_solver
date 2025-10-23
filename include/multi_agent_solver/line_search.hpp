@@ -7,46 +7,57 @@
 #include <Eigen/Dense>
 
 #include "multi_agent_solver/integrator.hpp"
-#include "multi_agent_solver/ocp.hpp"
 #include "multi_agent_solver/types.hpp"
 
 namespace mas
 {
 
 // Generic line search function alias
-using LineSearchFunction = std::function<
-  double( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients, const MotionModel& dynamics,
-          const ObjectiveFunction& objective_function, double dt, const std::map<std::string, double>& parameters )>;
+template<typename Scalar>
+using LineSearchFunctionT = std::function<Scalar( const StateT<Scalar>& initial_state, const ControlTrajectoryT<Scalar>& controls,
+                                                  const ControlGradientT<Scalar>& gradients, const MotionModelT<Scalar>& dynamics,
+                                                  const ObjectiveFunctionT<Scalar>& objective_function, Scalar dt,
+                                                  const std::map<std::string, Scalar>& parameters )>;
+using LineSearchFunction  = LineSearchFunctionT<double>;
 
 // Utility function to get parameter value with default
-inline double
-get_parameter( const std::map<std::string, double>& parameters, const std::string& key, double default_value )
+template<typename Scalar>
+inline Scalar
+get_parameter( const std::map<std::string, Scalar>& parameters, const std::string& key, Scalar default_value )
 {
   auto it = parameters.find( key );
   return ( it != parameters.end() ) ? it->second : default_value;
 }
 
-// Armijo line search
 inline double
-armijo_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
-                    const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
-                    const std::map<std::string, double>& parameters )
+get_parameter( const std::map<std::string, double>& parameters, const std::string& key, double default_value )
 {
+  return get_parameter<double>( parameters, key, default_value );
+}
 
-  double initial_step_size = get_parameter( parameters, "initial_step_size", 1.0 );
-  double beta              = get_parameter( parameters, "beta", 0.5 );
-  double c1                = get_parameter( parameters, "c1", 1e-6 );
+// Armijo line search
+template<typename Scalar>
+inline Scalar
+armijo_line_search( const StateT<Scalar>& initial_state, const ControlTrajectoryT<Scalar>& controls,
+                    const ControlGradientT<Scalar>& gradients, const MotionModelT<Scalar>& dynamics,
+                    const ObjectiveFunctionT<Scalar>& objective_function, Scalar dt, const std::map<std::string, Scalar>& parameters )
+{
+  Scalar initial_step_size = get_parameter<Scalar>( parameters, "initial_step_size", static_cast<Scalar>( 1.0 ) );
+  Scalar beta              = get_parameter<Scalar>( parameters, "beta", static_cast<Scalar>( 0.5 ) );
+  Scalar c1                = get_parameter<Scalar>( parameters, "c1", static_cast<Scalar>( 1e-6 ) );
 
-  double alpha                  = initial_step_size;
-  double cost_ref               = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
-  double directional_derivative = gradients.cwiseProduct( -gradients ).sum();
+  Scalar alpha    = initial_step_size;
+  Scalar cost_ref = objective_function( integrate_horizon<Scalar>( initial_state, controls, dt, dynamics, integrate_rk4<Scalar> ),
+                                        controls );
+  Scalar directional_derivative = gradients.cwiseProduct( -gradients ).sum();
 
   while( true )
   {
     // Compute trial controls and cost
-    ControlTrajectory trial_controls   = controls - alpha * gradients;
-    StateTrajectory   trial_trajectory = integrate_horizon( initial_state, trial_controls, dt, dynamics, integrate_rk4 );
-    double            trial_cost       = objective_function( trial_trajectory, trial_controls );
+    ControlTrajectoryT<Scalar> trial_controls   = controls - alpha * gradients;
+    StateTrajectoryT<Scalar>   trial_trajectory = integrate_horizon<Scalar>( initial_state, trial_controls, dt, dynamics,
+                                                                             integrate_rk4<Scalar> );
+    Scalar                     trial_cost       = objective_function( trial_trajectory, trial_controls );
 
     // Check Armijo condition. directional_derivative is negative, so the
     // right-hand side is less than cost_ref when a descent direction is
@@ -60,7 +71,7 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
     alpha *= beta;
 
     // Avoid excessively small step sizes
-    if( alpha < 1e-8 )
+    if( alpha < static_cast<Scalar>( 1e-8 ) )
     {
       break;
     }
@@ -69,25 +80,35 @@ armijo_line_search( const State& initial_state, const ControlTrajectory& control
   return alpha;
 }
 
-// Backtracking line search
 inline double
-backtracking_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
-                          const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
-                          const std::map<std::string, double>& parameters )
+armijo_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
+                    const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
+                    const std::map<std::string, double>& parameters )
 {
+  return armijo_line_search<double>( initial_state, controls, gradients, dynamics, objective_function, dt, parameters );
+}
 
-  double initial_step_size = get_parameter( parameters, "initial_step_size", 1.0 );
-  double beta              = get_parameter( parameters, "beta", 0.5 );
+// Backtracking line search
+template<typename Scalar>
+inline Scalar
+backtracking_line_search( const StateT<Scalar>& initial_state, const ControlTrajectoryT<Scalar>& controls,
+                          const ControlGradientT<Scalar>& gradients, const MotionModelT<Scalar>& dynamics,
+                          const ObjectiveFunctionT<Scalar>& objective_function, Scalar dt, const std::map<std::string, Scalar>& parameters )
+{
+  Scalar initial_step_size = get_parameter<Scalar>( parameters, "initial_step_size", static_cast<Scalar>( 1.0 ) );
+  Scalar beta              = get_parameter<Scalar>( parameters, "beta", static_cast<Scalar>( 0.5 ) );
 
-  double alpha    = initial_step_size;
-  double cost_ref = objective_function( integrate_horizon( initial_state, controls, dt, dynamics, integrate_rk4 ), controls );
+  Scalar alpha    = initial_step_size;
+  Scalar cost_ref = objective_function( integrate_horizon<Scalar>( initial_state, controls, dt, dynamics, integrate_rk4<Scalar> ),
+                                        controls );
 
   while( true )
   {
     // Compute trial controls and cost
-    ControlTrajectory trial_controls   = controls - alpha * gradients;
-    StateTrajectory   trial_trajectory = integrate_horizon( initial_state, trial_controls, dt, dynamics, integrate_rk4 );
-    double            trial_cost       = objective_function( trial_trajectory, trial_controls );
+    ControlTrajectoryT<Scalar> trial_controls   = controls - alpha * gradients;
+    StateTrajectoryT<Scalar>   trial_trajectory = integrate_horizon<Scalar>( initial_state, trial_controls, dt, dynamics,
+                                                                             integrate_rk4<Scalar> );
+    Scalar                     trial_cost       = objective_function( trial_trajectory, trial_controls );
 
     // Check if cost decreased
     if( trial_cost < cost_ref )
@@ -99,7 +120,7 @@ backtracking_line_search( const State& initial_state, const ControlTrajectory& c
     alpha *= beta;
 
     // Avoid excessively small step sizes
-    if( alpha < 1e-8 )
+    if( alpha < static_cast<Scalar>( 1e-8 ) )
     {
       break;
     }
@@ -108,13 +129,31 @@ backtracking_line_search( const State& initial_state, const ControlTrajectory& c
   return alpha;
 }
 
-// Constant step size line search for simplicity
 inline double
-constant_line_search( const State& /*initial_state*/, const ControlTrajectory& /*controls*/, const ControlGradient& /*gradients*/,
-                      const MotionModel& /*dynamics*/, const ObjectiveFunction& /*objective_function*/, double /*dt*/,
+backtracking_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
+                          const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
+                          const std::map<std::string, double>& parameters )
+{
+  return backtracking_line_search<double>( initial_state, controls, gradients, dynamics, objective_function, dt, parameters );
+}
+
+// Constant step size line search for simplicity
+template<typename Scalar>
+inline Scalar
+constant_line_search( const StateT<Scalar>& /*initial_state*/, const ControlTrajectoryT<Scalar>& /*controls*/,
+                      const ControlGradientT<Scalar>& /*gradients*/, const MotionModelT<Scalar>& /*dynamics*/,
+                      const ObjectiveFunctionT<Scalar>& /*objective_function*/, Scalar /*dt*/,
+                      const std::map<std::string, Scalar>& parameters )
+{
+  return get_parameter<Scalar>( parameters, "step_size", static_cast<Scalar>( 0.1 ) );
+}
+
+inline double
+constant_line_search( const State& initial_state, const ControlTrajectory& controls, const ControlGradient& gradients,
+                      const MotionModel& dynamics, const ObjectiveFunction& objective_function, double dt,
                       const std::map<std::string, double>& parameters )
 {
-
-  return get_parameter( parameters, "step_size", 0.1 );
+  return constant_line_search<double>( initial_state, controls, gradients, dynamics, objective_function, dt, parameters );
 }
+
 } // namespace mas

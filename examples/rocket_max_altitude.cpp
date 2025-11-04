@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "cli.hpp"
 #include "example_utils.hpp"
 #include "models/rocket_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -123,38 +124,33 @@ struct Options
 Options
 parse_options( int argc, char** argv )
 {
-  Options options;
-  for( int i = 1; i < argc; ++i )
+  Options                 options;
+  examples::cli::ArgParser args( argc, argv );
+
+  while( !args.empty() )
   {
-    const std::string arg = argv[i];
-    if( arg == "--help" || arg == "-h" )
+    const std::string raw_arg = std::string( args.peek() );
+    if( args.consume_flag( "--help", "-h" ) )
     {
       options.show_help = true;
       continue;
     }
-    if( arg == "--dump" )
+    if( args.consume_flag( "--dump" ) )
     {
       options.dump_traces = true;
       continue;
     }
 
-    const std::string solver_prefix = "--solver=";
-    if( arg.rfind( solver_prefix, 0 ) == 0 )
+    std::string value;
+    if( args.consume_option( "--solver", value ) )
     {
-      options.solver = arg.substr( solver_prefix.size() );
+      options.solver = value;
       continue;
     }
 
-    if( arg == "--solver" )
-    {
-      if( i + 1 >= argc )
-        throw std::invalid_argument( "Missing value for --solver" );
-      options.solver = argv[++i];
-      continue;
-    }
-
-    throw std::invalid_argument( "Unknown argument '" + arg + "'" );
+    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
   }
+
   return options;
 }
 

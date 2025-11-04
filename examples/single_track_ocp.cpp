@@ -115,42 +115,10 @@ create_single_track_lane_following_ocp()
   return problem;
 }
 
-struct Options
-{
-  bool        show_help = false;
-  std::string solver    = "ilqr";
-};
+using Options = examples::cli::SolverOptions;
 
 namespace
 {
-
-Options
-parse_options( int argc, char** argv )
-{
-  Options                 options;
-  examples::cli::ArgParser args( argc, argv );
-
-  while( !args.empty() )
-  {
-    const std::string raw_arg = std::string( args.peek() );
-    if( args.consume_flag( "--help", "-h" ) )
-    {
-      options.show_help = true;
-      continue;
-    }
-
-    std::string value;
-    if( args.consume_option( "--solver", value ) )
-    {
-      options.solver = value;
-      continue;
-    }
-
-    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
-  }
-
-  return options;
-}
 
 void
 print_usage()
@@ -168,7 +136,7 @@ main( int argc, char** argv )
   using namespace mas;
   try
   {
-    const Options options = parse_options( argc, argv );
+    const Options options = examples::cli::parse_solver_options( argc, argv );
     if( options.show_help )
     {
       print_usage();

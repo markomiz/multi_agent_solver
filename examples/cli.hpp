@@ -118,3 +118,147 @@ private:
 } // namespace cli
 } // namespace examples
 
+namespace examples
+{
+namespace cli
+{
+
+struct SolverOptions
+{
+  bool        show_help = false;
+  std::string solver    = "ilqr";
+};
+
+inline SolverOptions
+parse_solver_options( int argc, char** argv, std::string default_solver = "ilqr" )
+{
+  SolverOptions          options;
+  options.solver = std::move( default_solver );
+  ArgParser args( argc, argv );
+
+  while( !args.empty() )
+  {
+    const std::string raw_arg = std::string( args.peek() );
+    if( args.consume_flag( "--help", "-h" ) )
+    {
+      options.show_help = true;
+      continue;
+    }
+
+    std::string value;
+    if( args.consume_option( "--solver", value ) )
+    {
+      options.solver = value;
+      continue;
+    }
+
+    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
+  }
+
+  return options;
+}
+
+struct MultiAgentOptions
+{
+  bool        show_help = false;
+  int         agents    = 10;
+  int         max_outer = 10;
+  std::string solver    = "ilqr";
+  std::string strategy  = "centralized";
+};
+
+inline MultiAgentOptions
+parse_multi_agent_options( int argc, char** argv, MultiAgentOptions defaults = {} )
+{
+  MultiAgentOptions options = std::move( defaults );
+  ArgParser         args( argc, argv );
+  bool              positional_agents = false;
+
+  while( !args.empty() )
+  {
+    const std::string raw_arg = std::string( args.peek() );
+    if( args.consume_flag( "--help", "-h" ) )
+    {
+      options.show_help = true;
+      continue;
+    }
+
+    std::string value;
+    if( args.consume_option( "--agents", value ) )
+    {
+      options.agents = parse_int( "--agents", value );
+      continue;
+    }
+    if( args.consume_option( "--solver", value ) )
+    {
+      options.solver = value;
+      continue;
+    }
+    if( args.consume_option( "--strategy", value ) )
+    {
+      options.strategy = value;
+      continue;
+    }
+    if( args.consume_option( "--max-outer", value ) )
+    {
+      options.max_outer = parse_int( "--max-outer", value );
+      continue;
+    }
+
+    if( is_positional( raw_arg ) && !positional_agents )
+    {
+      args.take();
+      options.agents    = parse_int( "agents", raw_arg );
+      positional_agents = true;
+      continue;
+    }
+
+    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
+  }
+
+  return options;
+}
+
+struct RocketOptions
+{
+  bool        show_help   = false;
+  bool        dump_traces = false;
+  std::string solver      = "osqp";
+};
+
+inline RocketOptions
+parse_rocket_options( int argc, char** argv, RocketOptions defaults = {} )
+{
+  RocketOptions options = std::move( defaults );
+  ArgParser     args( argc, argv );
+
+  while( !args.empty() )
+  {
+    const std::string raw_arg = std::string( args.peek() );
+    if( args.consume_flag( "--help", "-h" ) )
+    {
+      options.show_help = true;
+      continue;
+    }
+    if( args.consume_flag( "--dump" ) )
+    {
+      options.dump_traces = true;
+      continue;
+    }
+
+    std::string value;
+    if( args.consume_option( "--solver", value ) )
+    {
+      options.solver = value;
+      continue;
+    }
+
+    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
+  }
+
+  return options;
+}
+
+} // namespace cli
+} // namespace examples
+

@@ -75,69 +75,10 @@ create_linear_lqr_ocp( int n_x, int n_u, double dt, int T )
   return ocp;
 }
 
-struct Options
-{
-  bool        show_help = false;
-  int         agents    = 10;
-  int         max_outer = 10;
-  std::string solver    = "ilqr";
-  std::string strategy  = "centralized";
-};
+using Options = examples::cli::MultiAgentOptions;
 
 namespace
 {
-
-Options
-parse_options( int argc, char** argv )
-{
-  Options                 options;
-  examples::cli::ArgParser args( argc, argv );
-  bool                    positional_agents = false;
-
-  while( !args.empty() )
-  {
-    const std::string raw_arg = std::string( args.peek() );
-    if( args.consume_flag( "--help", "-h" ) )
-    {
-      options.show_help = true;
-      continue;
-    }
-
-    std::string value;
-    if( args.consume_option( "--agents", value ) )
-    {
-      options.agents = examples::cli::parse_int( "--agents", value );
-      continue;
-    }
-    if( args.consume_option( "--solver", value ) )
-    {
-      options.solver = value;
-      continue;
-    }
-    if( args.consume_option( "--strategy", value ) )
-    {
-      options.strategy = value;
-      continue;
-    }
-    if( args.consume_option( "--max-outer", value ) )
-    {
-      options.max_outer = examples::cli::parse_int( "--max-outer", value );
-      continue;
-    }
-
-    if( examples::cli::is_positional( raw_arg ) && !positional_agents )
-    {
-      args.take();
-      options.agents    = examples::cli::parse_int( "agents", raw_arg );
-      positional_agents = true;
-      continue;
-    }
-
-    throw std::invalid_argument( "Unknown argument '" + raw_arg + "'" );
-  }
-
-  return options;
-}
 
 void
 print_usage()
@@ -157,7 +98,7 @@ main( int argc, char** argv )
   using namespace mas;
   try
   {
-    const Options options = parse_options( argc, argv );
+    const Options options = examples::cli::parse_multi_agent_options( argc, argv );
     if( options.show_help )
     {
       print_usage();

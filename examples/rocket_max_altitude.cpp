@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "cli.hpp"
 #include "example_utils.hpp"
 #include "models/rocket_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -113,51 +114,6 @@ create_max_altitude_rocket_ocp()
   return problem;
 }
 
-struct Options
-{
-  bool        show_help   = false;
-  bool        dump_traces = false;
-  std::string solver      = "osqp";
-};
-
-Options
-parse_options( int argc, char** argv )
-{
-  Options options;
-  for( int i = 1; i < argc; ++i )
-  {
-    const std::string arg = argv[i];
-    if( arg == "--help" || arg == "-h" )
-    {
-      options.show_help = true;
-      continue;
-    }
-    if( arg == "--dump" )
-    {
-      options.dump_traces = true;
-      continue;
-    }
-
-    const std::string solver_prefix = "--solver=";
-    if( arg.rfind( solver_prefix, 0 ) == 0 )
-    {
-      options.solver = arg.substr( solver_prefix.size() );
-      continue;
-    }
-
-    if( arg == "--solver" )
-    {
-      if( i + 1 >= argc )
-        throw std::invalid_argument( "Missing value for --solver" );
-      options.solver = argv[++i];
-      continue;
-    }
-
-    throw std::invalid_argument( "Unknown argument '" + arg + "'" );
-  }
-  return options;
-}
-
 void
 print_usage()
 {
@@ -175,7 +131,7 @@ main( int argc, char** argv )
 
   try
   {
-    const Options options = parse_options( argc, argv );
+    const examples::cli::RocketOptions options = examples::cli::parse_rocket_options( argc, argv );
     if( options.show_help )
     {
       print_usage();

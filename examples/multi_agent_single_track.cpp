@@ -1,16 +1,15 @@
 #include <cmath>
 
 #include <algorithm>
-#include <charconv>
 #include <chrono>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <vector>
 
+#include "cli.hpp"
 #include "example_utils.hpp"
 #include "models/single_track_model.hpp"
 #include "multi_agent_solver/agent.hpp"
@@ -53,96 +52,10 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   return problem;
 }
 
-struct Options
-{
-  bool        show_help = false;
-  int         agents    = 10;
-  int         max_outer = 10;
-  std::string solver    = "ilqr";
-  std::string strategy  = "centralized";
-};
+using Options = examples::cli::MultiAgentOptions;
 
 namespace
 {
-
-int
-parse_int( const std::string& label, const std::string& value )
-{
-  int         result   = 0;
-  const char* begin    = value.data();
-  const char* end      = begin + value.size();
-  const auto [ptr, ec] = std::from_chars( begin, end, result );
-  if( ec != std::errc() || ptr != end )
-    throw std::invalid_argument( "Invalid value for " + label + ": '" + value + "'" );
-  return result;
-}
-
-Options
-parse_options( int argc, char** argv )
-{
-  Options options;
-  bool    positional_agents = false;
-  for( int i = 1; i < argc; ++i )
-  {
-    std::string arg = argv[i];
-    if( arg.rfind( "--", 0 ) == 0 )
-    {
-      const auto eq_pos = arg.find( '=' );
-      const auto end    = eq_pos == std::string::npos ? arg.size() : eq_pos;
-      std::replace( arg.begin() + 2, arg.begin() + static_cast<std::ptrdiff_t>( end ), '_', '-' );
-    }
-    auto match_with_value = [&]( const std::string& name, std::string& out ) {
-      const std::string prefix = name + "=";
-      if( arg == name )
-      {
-        if( i + 1 >= argc )
-          throw std::invalid_argument( "Missing value for option '" + name + "'" );
-        out = argv[++i];
-        return true;
-      }
-      if( arg.rfind( prefix, 0 ) == 0 )
-      {
-        out = arg.substr( prefix.size() );
-        return true;
-      }
-      return false;
-    };
-
-    if( arg == "--help" || arg == "-h" )
-    {
-      options.show_help = true;
-      continue;
-    }
-
-    std::string value;
-    if( match_with_value( "--agents", value ) )
-    {
-      options.agents = parse_int( "--agents", value );
-    }
-    else if( match_with_value( "--solver", value ) )
-    {
-      options.solver = value;
-    }
-    else if( match_with_value( "--strategy", value ) )
-    {
-      options.strategy = value;
-    }
-    else if( match_with_value( "--max-outer", value ) )
-    {
-      options.max_outer = parse_int( "--max-outer", value );
-    }
-    else if( !arg.empty() && arg.front() != '-' && !positional_agents )
-    {
-      options.agents    = parse_int( "agents", arg );
-      positional_agents = true;
-    }
-    else
-    {
-      throw std::invalid_argument( "Unknown argument '" + arg + "'" );
-    }
-  }
-  return options;
-}
 
 void
 print_usage()
@@ -161,7 +74,7 @@ main( int argc, char** argv )
   using namespace mas;
   try
   {
-    const Options options = parse_options( argc, argv );
+    const Options options = examples::cli::parse_multi_agent_options( argc, argv );
     if( options.show_help )
     {
       print_usage();

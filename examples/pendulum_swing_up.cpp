@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "cli.hpp"
 #include "example_utils.hpp"
 #include "models/pendulum_model.hpp"
 #include "multi_agent_solver/ocp.hpp"
@@ -88,57 +89,10 @@ create_pendulum_swingup_ocp()
   return problem;
 }
 
-struct Options
-{
-  bool        show_help = false;
-  std::string solver    = "ilqr";
-};
+using Options = examples::cli::SolverOptions;
 
 namespace
 {
-
-Options
-parse_options( int argc, char** argv )
-{
-  Options options;
-  for( int i = 1; i < argc; ++i )
-  {
-    std::string arg              = argv[i];
-    auto        match_with_value = [&]( const std::string& name, std::string& out ) {
-      const std::string prefix = name + "=";
-      if( arg == name )
-      {
-        if( i + 1 >= argc )
-          throw std::invalid_argument( "Missing value for option '" + name + "'" );
-        out = argv[++i];
-        return true;
-      }
-      if( arg.rfind( prefix, 0 ) == 0 )
-      {
-        out = arg.substr( prefix.size() );
-        return true;
-      }
-      return false;
-    };
-
-    if( arg == "--help" || arg == "-h" )
-    {
-      options.show_help = true;
-      continue;
-    }
-
-    std::string value;
-    if( match_with_value( "--solver", value ) )
-    {
-      options.solver = value;
-    }
-    else
-    {
-      throw std::invalid_argument( "Unknown argument '" + arg + "'" );
-    }
-  }
-  return options;
-}
 
 void
 print_usage()
@@ -156,7 +110,7 @@ main( int argc, char** argv )
   using namespace mas;
   try
   {
-    const Options options = parse_options( argc, argv );
+    const Options options = examples::cli::parse_solver_options( argc, argv );
     if( options.show_help )
     {
       print_usage();

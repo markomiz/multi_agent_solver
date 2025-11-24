@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_EXAMPLES "Build example executables" ON)
 option(BUILD_SHARED_LIBS "Build as shared library" OFF)
+include(CTest)
 
 # Dependencies
 find_package(Eigen3 3.4 REQUIRED NO_MODULE)
@@ -80,8 +81,26 @@ configure_package_config_file(
   INSTALL_DESTINATION lib/cmake/MultiAgentSolver
 )
 
-install(FILES
-  "${CMAKE_CURRENT_BINARY_DIR}/MultiAgentSolverConfig.cmake"
-  "${CMAKE_CURRENT_BINARY_DIR}/MultiAgentSolverConfigVersion.cmake"
-  DESTINATION lib/cmake/MultiAgentSolver
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/MultiAgentSolverConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/MultiAgentSolverConfigVersion.cmake"
+    DESTINATION lib/cmake/MultiAgentSolver
 )
+
+if(BUILD_TESTING)
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    URL https://github.com/google/googletest/archive/refs/tags/v1.14.0.tar.gz
+  )
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+
+  enable_testing()
+  file(GLOB TEST_SOURCES CONFIGURE_DEPENDS tests/*.cpp)
+  add_executable(multi_agent_solver_tests ${TEST_SOURCES})
+  target_link_libraries(multi_agent_solver_tests PRIVATE MultiAgentSolver GTest::gtest_main)
+
+  include(GoogleTest)
+  gtest_discover_tests(multi_agent_solver_tests)
+endif()

@@ -14,5 +14,7 @@ jobs:
         run: sudo ./scripts/setup_dependencies.sh
       - name: Build project
         run: ./scripts/build.sh
+      - name: Run tests
+        run: cd build/release && ctest --output-on-failure
       - name: Run examples
         run: ./scripts/run.sh

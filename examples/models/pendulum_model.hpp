@@ -13,7 +13,7 @@ pendulum_dynamics( const State& x, const Control& u )
   const double    m = 1.0;  // [kg]
   StateDerivative dxdt( 2 );
   dxdt( 0 ) = x( 1 );
-  dxdt( 1 ) = ( g / l ) * std::sin( x( 0 ) ) + u( 0 ) / ( m * l * l );
+  dxdt( 1 ) = -( g / l ) * std::sin( x( 0 ) ) + u( 0 ) / ( m * l * l );
   return dxdt;
 }
 
@@ -24,7 +24,7 @@ pendulum_state_jacobian( const State& x, const Control& )
   const double    l = 1.0;
   Eigen::MatrixXd A = Eigen::MatrixXd::Zero( 2, 2 );
   A( 0, 1 )         = 1.0;
-  A( 1, 0 )         = ( g / l ) * std::cos( x( 0 ) );
+  A( 1, 0 )         = -( g / l ) * std::cos( x( 0 ) );
   return A;
 }
 

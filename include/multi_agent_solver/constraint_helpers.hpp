@@ -15,8 +15,8 @@ namespace mas
 
 // Helper function to compute the augmented cost
 inline double
-compute_augmented_cost( const OCP& problem, const ConstraintViolations& equality_multipliers,
-                        const ConstraintViolations& inequality_multipliers, double penalty_parameter, const StateTrajectory& states,
+compute_augmented_cost( const OCP& problem, const ConstraintViolationsTrajectory& equality_multipliers,
+                        const ConstraintViolationsTrajectory& inequality_multipliers, double penalty_parameter, const StateTrajectory& states,
                         const ControlTrajectory& controls )
 {
   double cost = problem.objective_function( states, controls );
@@ -26,14 +26,22 @@ compute_augmented_cost( const OCP& problem, const ConstraintViolations& equality
     if( problem.equality_constraints )
     {
       ConstraintViolations eq_residuals  = problem.equality_constraints( states.col( t ), controls.col( t ) );
-      cost                              += equality_multipliers.dot( eq_residuals ) + 0.5 * penalty_parameter * eq_residuals.squaredNorm();
+      if (equality_multipliers.cols() > t) {
+        cost += equality_multipliers.col(t).dot( eq_residuals ) + 0.5 * penalty_parameter * eq_residuals.squaredNorm();
+      }
     }
 
     if( problem.inequality_constraints )
     {
       ConstraintViolations ineq_residuals  = problem.inequality_constraints( states.col( t ), controls.col( t ) );
-      ConstraintViolations slack           = ( ineq_residuals.array() > 0 ).select( ineq_residuals, 0 );
-      cost                                += inequality_multipliers.dot( slack ) + 0.5 * penalty_parameter * slack.squaredNorm();
+      if (inequality_multipliers.cols() > t) {
+        // PHR augmented Lagrangian term for inequalities:
+        // (1 / 2rho) * ( max(0, lambda + rho * g)^2 - lambda^2 )
+        const auto& lambda = inequality_multipliers.col(t);
+        Eigen::VectorXd combined = lambda + penalty_parameter * ineq_residuals;
+        Eigen::VectorXd combined_plus = combined.cwiseMax(0.0);
+        cost += (0.5 / penalty_parameter) * (combined_plus.squaredNorm() - lambda.squaredNorm());
+      }
     }
   }
 
@@ -43,7 +51,7 @@ compute_augmented_cost( const OCP& problem, const ConstraintViolations& equality
 // Helper function to update Lagrange multipliers
 inline void
 update_lagrange_multipliers( const OCP& problem, const StateTrajectory& states, const ControlTrajectory& controls,
-                             ConstraintViolations& equality_multipliers, ConstraintViolations& inequality_multipliers,
+                             ConstraintViolationsTrajectory& equality_multipliers, ConstraintViolationsTrajectory& inequality_multipliers,
                              double penalty_parameter )
 {
   for( int t = 0; t < controls.cols(); ++t )
@@ -51,13 +59,18 @@ update_lagrange_multipliers( const OCP& problem, const StateTrajectory& states, 
     if( problem.equality_constraints )
     {
       ConstraintViolations eq_residuals  = problem.equality_constraints( states.col( t ), controls.col( t ) );
-      equality_multipliers              += penalty_parameter * eq_residuals;
+      if (equality_multipliers.cols() > t) {
+          equality_multipliers.col(t) += penalty_parameter * eq_residuals;
+      }
     }
 
     if( problem.inequality_constraints )
     {
       ConstraintViolations ineq_residuals  = problem.inequality_constraints( states.col( t ), controls.col( t ) );
-      inequality_multipliers              += penalty_parameter * ( ineq_residuals.array() > 0 ).select( ineq_residuals, 0 );
+      if (inequality_multipliers.cols() > t) {
+          // Update rule: lambda_next = max(0, lambda + rho * g)
+          inequality_multipliers.col(t) = (inequality_multipliers.col(t) + penalty_parameter * ineq_residuals).cwiseMax(0.0);
+      }
     }
   }
 }

@@ -32,6 +32,7 @@ using TerminalCostFunction = std::function<double( const State& )>;
 
 // Constraints
 using ConstraintViolations        = Eigen::VectorXd;
+using ConstraintViolationsTrajectory = Eigen::MatrixXd;
 using ConstraintsFunction         = std::function<ConstraintViolations( const State&, const Control& )>;
 using ConstraintsJacobian         = Eigen::MatrixXd;
 using ConstraintsJacobianFunction = std::function<ConstraintsJacobian( const State&, const Control& )>;

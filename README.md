@@ -45,12 +45,12 @@ Maximize the altitude of a vertical rocket given a limited mass of fuel. The sol
 
 **Run it:**
 ```bash
-./build/release/rocket_max_altitude --solver ilqr
+./build/release/rocket_max_altitude --solver cgd
 ```
 
 **Generate the animation:**
 ```bash
-./scripts/animate_example.py rocket_max_altitude -- --solver ilqr
+./scripts/animate_example.py rocket_max_altitude -- --solver cgd
 ```
 
 ### Multi-Agent Single Track

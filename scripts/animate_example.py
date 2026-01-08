@@ -182,16 +182,28 @@ def animate_rocket(
     fig, ax = plt.subplots(figsize=(6, 8))
 
     max_h = np.max(h)
+    min_h = np.min(h)
+
+    # Ensure reasonable y-limits even if trajectory is flat or negative
+    if max_h == min_h:
+        y_padding = 1.0
+    else:
+        y_padding = (max_h - min_h) * 0.1
+
+    # Rocket starts at 0, so include 0 in the view
+    y_min = min(0.0, min_h) - y_padding
+    y_max = max(10.0, max_h) + y_padding # Ensure at least some height is shown
+
     ax.set_xlim(-1, 1)
-    ax.set_ylim(0, max_h * 1.1)
-    ax.set_aspect('equal') # This might make it very thin if max_h is large, handle below
+    ax.set_ylim(y_min, y_max)
+    ax.set_aspect('equal')
     ax.grid(True)
     ax.set_title("Rocket Max Altitude")
     ax.set_ylabel("Altitude (m)")
     ax.set_xticks([]) # Remove x ticks as it is 1D motion
 
-    # Adjust aspect if height is very large compared to width 2
-    if max_h > 10:
+    # Adjust aspect if height range is large
+    if (y_max - y_min) > 10:
          ax.set_aspect('auto')
 
     rocket_marker, = ax.plot([], [], 'r^', markersize=10, label='Rocket')

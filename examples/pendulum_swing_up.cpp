@@ -33,7 +33,7 @@ mas::OCP create_pendulum_swingup_ocp()
   OCP problem;
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 100;   // 5 seconds
+  problem.horizon_steps = 60;   // 3 seconds
   problem.dt            = 0.05;
 
   // Downward is theta=pi in your convention; add small perturbation.
@@ -49,7 +49,7 @@ mas::OCP create_pendulum_swingup_ocp()
   const double E_des = mgl;  // energy at upright with omega=0
 
   // ---- Weights (tune these first) ----
-  const double w_energy = 5.0;     // keep but reduce vs. before
+  const double w_energy = 2.0;
   const double w_u      = 0.05;
   const double w_shape  = 2.0;     // stage "point toward upright"
   const double w_omega  = 0.05;    // stage damping (small)
@@ -57,10 +57,21 @@ mas::OCP create_pendulum_swingup_ocp()
   const double wT_pos   = 500.0;   // terminal upright
   const double wT_vel   = 100.0;   // terminal zero omega
 
-  problem.stage_cost = [=](const State& x, const Control& u, size_t /*k*/) {
+  const double horizon_d = static_cast<double>(problem.horizon_steps);
+
+  problem.stage_cost = [=](const State& x, const Control& u, size_t k) {
     const double theta  = x(0);
     const double omega  = x(1);
     const double torque = u(0);
+
+    // Time-varying weights: Energy matters early, Shaping matters late
+    const double s = static_cast<double>(k) / (horizon_d - 1.0);
+    const double late = s * s;
+    const double early = 1.0 - late;
+
+    const double w_energy_k = w_energy * (0.2 + 0.8 * early);
+    const double w_shape_k  = w_shape * (0.2 + 0.8 * late);
+    const double w_omega_k  = w_omega * (0.2 + 0.8 * late);
 
     // Energy
     const double T = 0.5 * m * l * l * omega * omega;
@@ -72,10 +83,10 @@ mas::OCP create_pendulum_swingup_ocp()
     // Upright shaping: theta=0 is upright => 1 - cos(theta) is 0 at upright, smooth & periodic
     const double upright_error = 1.0 - std::cos(theta);
 
-    return w_energy * energy_error * energy_error
-         + w_shape  * upright_error
-         + w_omega  * omega * omega
-         + w_u      * torque * torque;
+    return w_energy_k * energy_error * energy_error
+         + w_shape_k  * upright_error
+         + w_omega_k  * omega * omega
+         + w_u        * torque * torque;
   };
 
   problem.terminal_cost = [=](const State& x) {
@@ -91,15 +102,14 @@ mas::OCP create_pendulum_swingup_ocp()
   problem.input_lower_bounds = Eigen::VectorXd::Constant(1, -torque_max);
   problem.input_upper_bounds = Eigen::VectorXd::Constant(1,  torque_max);
 
-  // Initial guess (keep zero if you want, but a tiny sinusoid often helps)
+  // Initial guess with tiny sinusoid to break symmetry
   problem.initial_controls =
       ControlTrajectory::Zero(problem.control_dim, problem.horizon_steps);
 
-  // If you’re willing to seed slightly:
-  // for (int k = 0; k < problem.horizon_steps; ++k) {
-  //   const double t = k * problem.dt;
-  //   problem.initial_controls(0, k) = 0.2 * torque_max * std::sin(2.0 * M_PI * t);
-  // }
+  for (int k = 0; k < problem.horizon_steps; ++k) {
+    const double t = k * problem.dt;
+    problem.initial_controls(0, k) = 0.2 * torque_max * std::sin(2.0 * M_PI * t);
+  }
 
   problem.initialize_problem();
   problem.verify_problem();

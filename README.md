@@ -129,7 +129,7 @@ The repository includes Python helpers for benchmarking and visualising the exam
 * **Animate examples** – generate GIFs for supported examples (pendulum, rocket, track).
 
   ```bash
-  ./scripts/animate_example.py pendulum_swing_up -- --solver ilqr
+  ./scripts/animate_example.py pendulum_swing_up -- --solver osqp_collocation
   ```
 
 ## 📂 **Project Structure**

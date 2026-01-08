@@ -32,7 +32,7 @@ def animate_pendulum(
     L = 1.0
 
     x = L * np.sin(theta)
-    y = -L * np.cos(theta)
+    y = L * np.cos(theta)
 
     fig, ax = plt.subplots(figsize=(6, 6))
     ax.set_xlim(-1.5 * L, 1.5 * L)

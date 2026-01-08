@@ -15,17 +15,17 @@
 
 // The Pendulum Swing-Up problem is reformulated here using Energy Shaping.
 //
-// Goal: Swing the pendulum from the stable downward position (theta=0)
-//       to the unstable upward position (theta=pi).
+// Goal: Swing the pendulum from the stable downward position (theta=pi)
+//       to the unstable upward position (theta=0).
 //
-// Dynamics (Standard Pendulum, 0=Down):
-//   theta_ddot = -(g/l) * sin(theta) + u / (m*l^2)
+// Dynamics (0=Up):
+//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2)
 //
 // Energy:
 //   E = Kinetic + Potential
 //   T = 0.5 * m * l^2 * omega^2
-//   V = -m * g * l * cos(theta)  (Min at 0, Max at pi)
-//   E_des = m * g * l (at theta=pi)
+//   V = m * g * l * cos(theta)  (Max at 0, Min at pi)
+//   E_des = m * g * l (at theta=0)
 
 mas::OCP
 create_pendulum_swingup_ocp()
@@ -40,14 +40,15 @@ create_pendulum_swingup_ocp()
 
   // Start hanging down (stable equilibrium)
   // Perturb slightly to ensure non-zero gradients for the energy cost
-  problem.initial_state = Eigen::Vector2d( 0.05, 0.0 );
+  // theta = pi is down.
+  problem.initial_state = Eigen::Vector2d( M_PI - 0.05, 0.0 );
 
   problem.dynamics = pendulum_dynamics;
 
   const double g = 9.81;
   const double l = 1.0;
   const double m = 1.0;
-  const double E_des = m * g * l; // Potential energy at upright (theta=pi)
+  const double E_des = m * g * l; // Potential energy at upright (theta=0)
 
   // Weights
   const double w_energy = 1000.0;
@@ -64,7 +65,7 @@ create_pendulum_swingup_ocp()
 
     // Current Energy
     double T = 0.5 * m * l * l * omega * omega;
-    double V = -m * g * l * std::cos( theta );
+    double V = m * g * l * std::cos( theta );
     double E = T + V;
 
     double energy_error = E - E_des;
@@ -72,14 +73,14 @@ create_pendulum_swingup_ocp()
     return w_energy * energy_error * energy_error + w_ctrl * torque * torque + w_omega * omega * omega;
   };
 
-  // Terminal cost: "Lighthouse" to catch the upright state (pi)
-  // Using (1 + cos(theta)) handles the periodicity naturally.
-  // 1 + cos(pi) = 0
-  // 1 + cos(0) = 2
+  // Terminal cost: "Lighthouse" to catch the upright state (0)
+  // Using (1 - cos(theta)) handles the periodicity naturally.
+  // 1 - cos(0) = 0
+  // 1 - cos(pi) = 2
   problem.terminal_cost = [=]( const State& x ) {
     double theta = x( 0 );
     double omega = x( 1 );
-    return term_w_pos * ( 1.0 + std::cos( theta ) ) + term_w_vel * omega * omega;
+    return term_w_pos * ( 1.0 - std::cos( theta ) ) + term_w_vel * omega * omega;
   };
 
   // Input constraints (Voltage/Torque limit)

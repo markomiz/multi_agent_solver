@@ -18,83 +18,88 @@
 // Goal: Swing the pendulum from the stable downward position (theta=pi)
 //       to the unstable upward position (theta=0).
 //
-// Dynamics (0=Up, +sin):
-//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2) - (b/ml^2)*omega
+// Dynamics (0=Up):
+//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2) - b*omega
 //
 // Energy:
-//   E = Kinetic + Potential
 //   T = 0.5 * m * l^2 * omega^2
-//   V = m * g * l * cos(theta)  (Max at 0, Min at pi)
+//   V = m * g * l * cos(theta)
 //   E_des = m * g * l (at theta=0)
 
-mas::OCP
-create_pendulum_swingup_ocp()
+mas::OCP create_pendulum_swingup_ocp()
 {
   using namespace mas;
-  OCP problem;
 
+  OCP problem;
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 100; // 5 seconds
+  problem.horizon_steps = 100;   // 5 seconds
   problem.dt            = 0.05;
 
-  // Start hanging down (stable equilibrium)
-  // Perturb slightly to ensure non-zero gradients for the energy cost
-  // theta = pi is down.
-  problem.initial_state = Eigen::Vector2d( M_PI - 0.05, 0.0 );
+  // Downward is theta=pi in your convention; add small perturbation.
+  problem.initial_state = Eigen::Vector2d(M_PI - 0.05, 0.0);
 
   problem.dynamics = pendulum_dynamics;
 
   const double g = 9.81;
   const double l = 1.0;
   const double m = 1.0;
-  const double E_des = m * g * l; // Potential energy at upright (theta=0)
 
-  // Weights
-  const double w_energy = 10.0;
-  const double w_ctrl   = 0.1;
-  const double w_omega  = 0.0;
+  const double mgl   = m * g * l;
+  const double E_des = mgl;  // energy at upright with omega=0
 
-  const double term_w_pos = 500.0;
-  const double term_w_vel = 100.0;
+  // ---- Weights (tune these first) ----
+  const double w_energy = 5.0;     // keep but reduce vs. before
+  const double w_u      = 0.05;
+  const double w_shape  = 2.0;     // stage "point toward upright"
+  const double w_omega  = 0.05;    // stage damping (small)
 
-  problem.stage_cost = [=]( const State& x, const Control& u, size_t ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    double torque = u( 0 );
+  const double wT_pos   = 500.0;   // terminal upright
+  const double wT_vel   = 100.0;   // terminal zero omega
 
-    // Current Energy
-    double T = 0.5 * m * l * l * omega * omega;
-    double V = m * g * l * std::cos( theta );
-    double E = T + V;
+  problem.stage_cost = [=](const State& x, const Control& u, size_t /*k*/) {
+    const double theta  = x(0);
+    const double omega  = x(1);
+    const double torque = u(0);
 
-    // Normalized Energy Error: (E - E_des) / mgl
-    // Denominator = m*g*l = 9.81
-    double energy_error = (E - E_des) / (m * g * l);
+    // Energy
+    const double T = 0.5 * m * l * l * omega * omega;
+    const double V = mgl * std::cos(theta);
+    const double E = T + V;
+
+    const double energy_error = (E - E_des) / mgl;
+
+    // Upright shaping: theta=0 is upright => 1 - cos(theta) is 0 at upright, smooth & periodic
+    const double upright_error = 1.0 - std::cos(theta);
 
     return w_energy * energy_error * energy_error
-         + w_ctrl * torque * torque
-         + w_omega * omega * omega;
+         + w_shape  * upright_error
+         + w_omega  * omega * omega
+         + w_u      * torque * torque;
   };
 
-  // Terminal cost: Removed as requested to rely on energy shaping stage cost
-  problem.terminal_cost = [=]( const State& ) {
-    return 0.0;
+  problem.terminal_cost = [=](const State& x) {
+    const double theta = x(0);
+    const double omega = x(1);
+
+    const double upright_error = 1.0 - std::cos(theta); // 0 at theta=0
+    return wT_pos * upright_error + wT_vel * omega * omega;
   };
 
-  // Input constraints (Voltage/Torque limit)
-  // Let's use a limit that requires swinging (cannot lift statically).
-  // Static torque required is m*g*l = 9.81.
-  // Limit to 5.0 to force energy pumping.
+  // Input constraints
   const double torque_max = 5.0;
-  Eigen::VectorXd lower( 1 ), upper( 1 );
-  lower << -torque_max;
-  upper << torque_max;
-  problem.input_lower_bounds = lower;
-  problem.input_upper_bounds = upper;
+  problem.input_lower_bounds = Eigen::VectorXd::Constant(1, -torque_max);
+  problem.input_upper_bounds = Eigen::VectorXd::Constant(1,  torque_max);
 
-  // No initial control guess (zero) to test robust formulation
-  problem.initial_controls = ControlTrajectory::Zero( problem.control_dim, problem.horizon_steps );
+  // Initial guess (keep zero if you want, but a tiny sinusoid often helps)
+  problem.initial_controls =
+      ControlTrajectory::Zero(problem.control_dim, problem.horizon_steps);
+
+  // If you’re willing to seed slightly:
+  // for (int k = 0; k < problem.horizon_steps; ++k) {
+  //   const double t = k * problem.dt;
+  //   problem.initial_controls(0, k) = 0.2 * torque_max * std::sin(2.0 * M_PI * t);
+  // }
 
   problem.initialize_problem();
   problem.verify_problem();

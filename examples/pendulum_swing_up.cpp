@@ -51,12 +51,13 @@ create_pendulum_swingup_ocp()
   const double E_des = m * g * l; // Potential energy at upright (theta=0)
 
   // Weights
-  const double w_energy = 1000.0;
-  const double w_ctrl   = 1e-6;
-  const double w_omega  = 10000.0; // Regularization
+  const double w_energy = 100.0; // Reduced slightly to allow position guidance
+  const double w_pos    = 10.0;  // Guide towards Up
+  const double w_ctrl   = 1e-3;  // Slightly higher control cost to prevent chatter
+  const double w_omega  = 0.1;   // Reduced regularization
 
   const double term_w_pos = 1000.0;
-  const double term_w_vel = 10.0;
+  const double term_w_vel = 100.0;
 
   problem.stage_cost = [=]( const State& x, const Control& u, size_t ) {
     double theta = x( 0 );
@@ -70,7 +71,11 @@ create_pendulum_swingup_ocp()
 
     double energy_error = E - E_des;
 
-    return w_energy * energy_error * energy_error + w_ctrl * torque * torque + w_omega * omega * omega;
+    // Mix of Energy Shaping and Manifold Attraction
+    return w_energy * energy_error * energy_error
+         + w_pos * (1.0 - std::cos(theta))
+         + w_ctrl * torque * torque
+         + w_omega * omega * omega;
   };
 
   // Terminal cost: "Lighthouse" to catch the upright state (0)

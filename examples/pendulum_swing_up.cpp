@@ -58,7 +58,7 @@ create_pendulum_swingup_ocp()
   // Weights
   const double w_energy = 1000.0;
   const double w_ctrl   = 1e-6;
-  const double w_omega  = 0.0; // Regularization
+  const double w_omega  = 0.1; // Regularization
 
   const double term_w_pos = 1000.0;
   const double term_w_vel = 10.0;

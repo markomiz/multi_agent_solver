@@ -13,6 +13,21 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
+// The Pendulum Swing-Up problem is a classic control challenge.
+// The goal is to swing a pendulum from a resting position (hanging down)
+// to an inverted position (pointing up) and balance it there.
+//
+// State: [theta, omega]
+//   theta: angle (0 = hanging down, pi = pointing up)
+//   omega: angular velocity
+// Control: [torque]
+//   torque: applied at the pivot
+//
+// The cost function penalizes:
+// 1. Deviation from the goal angle (pi)
+// 2. High angular velocity (we want to stop at the top)
+// 3. Excessive control effort (energy efficiency)
+
 mas::OCP
 create_pendulum_swingup_ocp()
 {
@@ -24,6 +39,7 @@ create_pendulum_swingup_ocp()
   problem.horizon_steps = 100;
   problem.dt            = 0.05;
 
+  // Start hanging down (0 angle, 0 velocity)
   problem.initial_state = Eigen::Vector2d::Zero();
 
   problem.dynamics = pendulum_dynamics;
@@ -34,6 +50,8 @@ create_pendulum_swingup_ocp()
   const double w_torque   = 0.01;
   const double torque_max = 5.0;
 
+  // Stage cost: integrated over the trajectory
+  // J = sum( w_theta * (theta - goal)^2 + w_omega * omega^2 + w_torque * torque^2 )
   problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
     double theta = x( 0 );
     double omega = x( 1 );
@@ -41,42 +59,16 @@ create_pendulum_swingup_ocp()
     return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) / 100.0;
   };
 
+  // Terminal cost: heavily penalize not being at the goal at the end
   problem.terminal_cost = [=]( const State& x ) {
     double theta = x( 0 );
     double omega = x( 1 );
     return w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 );
   };
 
-  // problem.cost_state_gradient = [=]( const StageCostFunction&, const State& x, const Control&, size_t ) {
-  //   Eigen::Vector2d grad;
-  //   grad( 0 ) = 2.0 * w_theta * ( x( 0 ) - theta_goal );
-  //   grad( 1 ) = 2.0 * w_omega * x( 1 );
-  //   return grad;
-  // };
-
-  // problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& u, size_t ) {
-  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( 1 );
-  //   grad( 0 )            = 2.0 * w_torque * u( 0 );
-  //   return grad;
-  // };
-
-  // problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
-  //   H( 0, 0 )         = 2.0 * w_theta;
-  //   H( 1, 1 )         = 2.0 * w_omega;
-  //   return H;
-  // };
-
-  // problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 1, 1 );
-  //   H( 0, 0 )         = 2.0 * w_torque;
-  //   return H;
-  // };
-
-  // problem.dynamics_state_jacobian = []( const MotionModel&, const State& x, const Control& u ) { return pendulum_state_jacobian( x, u );
-  // }; problem.dynamics_control_jacobian = []( const MotionModel&, const State& x, const Control& u ) {
-  //   return pendulum_control_jacobian( x, u );
-  // };
+  // Note: Gradients and Hessians can be provided manually for better performance,
+  // but the solver can also use automatic differentiation or finite differences if they are not provided.
+  // In this example, we rely on the solver's internal differentiation for simplicity.
 
   Eigen::VectorXd lower( 1 ), upper( 1 );
   lower << -torque_max;

@@ -8,6 +8,69 @@ MultiAgentSolver is a high-performance C++ library designed to solve multi-agent
 
 Additionally, it supports multi-agent coordination through Nash Equilibrium-based optimization and for comparison combining multiple agents into one big optimization problem.
 
+## 📖 Table of Contents
+
+- [Examples](#-examples)
+  - [Pendulum Swing Up](#pendulum-swing-up)
+  - [Rocket Max Altitude](#rocket-max-altitude)
+  - [Multi-Agent Single Track](#multi-agent-single-track)
+- [Building and Running](#-building-and-running)
+- [Results](#results)
+- [Project Structure](#-project-structure)
+- [Contribution Guide](#contribution-guide)
+
+## 🚀 Examples
+
+### Pendulum Swing Up
+
+The classic control problem: swing a pendulum from a resting down position to balance it upright.
+
+![Pendulum Swing Up](docs/images/pendulum_swing_up.gif)
+
+**Run it:**
+```bash
+./build/release/pendulum_swing_up --solver ilqr
+```
+
+**Generate the animation:**
+```bash
+./scripts/animate_example.py pendulum_swing_up -- --solver ilqr
+```
+
+### Rocket Max Altitude
+
+Maximize the altitude of a vertical rocket given a limited mass of fuel. The solver must optimize the thrust profile to go as high as possible while battling gravity and drag (if modeled), and ensuring the fuel mass doesn't drop below zero.
+
+![Rocket Max Altitude](docs/images/rocket_max_altitude.gif)
+
+**Run it:**
+```bash
+./build/release/rocket_max_altitude --solver ilqr
+```
+
+**Generate the animation:**
+```bash
+./scripts/animate_example.py rocket_max_altitude -- --solver ilqr
+```
+
+### Multi-Agent Single Track
+
+Multiple agents (cars) independently trying to maintain a target velocity on a circular track. This demonstrates the framework's ability to handle multiple systems simultaneously.
+
+![Multi-Agent Single Track](docs/images/multi_agent_single_track.gif)
+
+**Run it:**
+```bash
+./build/release/multi_agent_single_track --agents 3 --solver ilqr
+```
+
+**Generate the animation:**
+```bash
+./scripts/animate_example.py multi_agent_single_track -- --agents 3 --solver ilqr
+```
+
+---
+
 ## 🛠️ **Dependencies**
 
 * **Eigen3** - Linear algebra
@@ -24,13 +87,6 @@ All dependencies can be automatically installed with the `setup_dependencies.sh`
 > ./scripts/setup_dependencies.sh --no-system-packages  # skip package manager operations (dependencies already installed)
 > PREFIX="$HOME/.local" ./scripts/setup_dependencies.sh  # install OSQP/OsqpEigen into a custom prefix
 > ```
->
-> The script detects the operating system, chooses a supported package manager (`apt`, `brew`, `pacman`, `dnf`, or `yum`), and
-> gracefully falls back if none is available. Third-party libraries are built into a user-writable prefix (`$HOME/.local` by
-> default) and the `CMAKE_PREFIX_PATH` environment variable is configured so subsequent CMake invocations can discover them.
-> The script also drops a reusable environment snippet at `$PREFIX/share/multi_agent_solver/environment.sh`; source it (or add
-> it to your shell profile) to make the prefix available to manual CMake builds. When running in Docker/CI environments the
-> defaults continue to work without additional flags.
 
 ---
 
@@ -42,16 +98,6 @@ The recommended way to build and run the project is using Docker. This ensures a
 ./scripts/run_docker.sh
 ```
 
-This will:
-
-* Clean up any existing Docker containers of the same name
-* Rebuild the Docker image
-* Run the container interactively
-
-> **Note:** The Docker build context excludes local `build/` and `cmake-build-*` directories via `.dockerignore`, ensuring host
-> build artifacts never sneak into container images.
-
-
 ## 📝 **Manual Build (Without Docker)**
 
 If you prefer to build manually:
@@ -61,18 +107,7 @@ If you prefer to build manually:
 ./scripts/build.sh
 ```
 
-The build helper understands both `./scripts/build.sh Release` and `./scripts/build.sh --build-type Release`. It automatically
-loads the generated dependency hints when `CMAKE_PREFIX_PATH` is unset so Docker builds and fresh shells continue to locate
-OSQP/OsqpEigen without extra configuration. Use
-`--clean` to start from a blank build directory; otherwise the script automatically removes the cached tree when
-`CMAKE_SYSTEM_NAME` from a previous configuration does not match the current host (e.g., switching between local and
-Docker builds).
-
-### **Run the Examples:**
-
-```bash
-./scripts/run.sh
-```
+The build helper understands both `./scripts/build.sh Release` and `./scripts/build.sh --build-type Release`.
 
 ### **Utility scripts**
 
@@ -85,15 +120,17 @@ The repository includes Python helpers for benchmarking and visualising the exam
       --solvers ilqr cgd --strategies centralized sequential --agents 8
   ```
 
-  When the executables finish successfully, the script prints a compact table that lists the cost and runtime reported by each run.
-
-* **Plot trajectories** – run a single example and plot the CSV-style trajectories it prints. Additional arguments after `--` are forwarded to the example executable:
+* **Plot trajectories** – run a single example and plot the CSV-style trajectories it prints.
 
   ```bash
   ./scripts/plot_example.py multi_agent_lqr -- --agents 4 --solver ilqr --strategy sequential
   ```
 
-  By default the script opens an interactive Matplotlib window. Use `--output-dir plots --no-show` to save the generated figures as PNG files instead.
+* **Animate examples** – generate GIFs for supported examples (pendulum, rocket, track).
+
+  ```bash
+  ./scripts/animate_example.py pendulum_swing_up -- --solver ilqr
+  ```
 
 ## 📂 **Project Structure**
 
@@ -107,18 +144,18 @@ The repository includes Python helpers for benchmarking and visualising the exam
 ├── scripts                    # Helper scripts
 │   ├── build.sh
 │   ├── run.sh
-│   └── setup_dependencies.sh
+│   ├── setup_dependencies.sh
+│   ├── animate_example.py     # Generate GIFs
+│   └── plot_example.py        # Plot static graphs
 ├── cmake                      # CMake configuration files
-│   └── MultiAgentSolverConfig.cmake.in
 ├── build                      # Build artifacts
 └── README.md                  # Project documentation
 ```
 
-
-
 ## Results
 
 Times and costs for different methods in the example code:
+
 ```
 🚗 Single-Track Lane Following Test 🚗
 ---------------------------------------------
@@ -131,7 +168,6 @@ iLQR                24.4039        1.06887
 ```
 
 ```
-
 Multi-Agent Single Track Test
 
 Method                                  Cost           Time (ms)      
@@ -139,23 +175,11 @@ Method                                  Cost           Time (ms)
 Centralized CGD                         7928.151       1214.919       
 Centralized iLQR                        7928.501       135.472        
 Centralized OSQP                        7929.011       285.711        
-Centralized OSQP-collocation            7929.392       1071.582       
-Nash Sequential CGD                     7928.153       26.612         
-Nash Sequential iLQR                    7928.327       11.053         
-Nash Sequential OSQP                    7928.384       38.514         
-Nash Sequential OSQP-collocation        7928.158       2098.299       
-Nash LineSearch CGD                     7928.153       27.597         
-Nash LineSearch iLQR                    7928.327       13.807         
-Nash LineSearch OSQP                    7928.384       40.643         
-Nash LineSearch OSQP-collocation        7928.152       2010.733       
-Nash TrustRegion CGD                    7928.153       34.767         
-Nash TrustRegion iLQR                   7928.199       14.093         
-Nash TrustRegion OSQP                   7928.417       46.087         
-Nash TrustRegion OSQP-collocation       7928.152       1596.460 
+...
 ```
 
 ## License
 Apache 2.0
 
 ## Project status
-WIP  - still earlyl in development but working.
+WIP  - still early in development but working.

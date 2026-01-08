@@ -17,6 +17,17 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/strategies/strategy.hpp"
 
+// The Multi-Agent Single Track example demonstrates how to set up
+// multiple independent agents attempting to track a circular path.
+//
+// Each agent is a "single track" car model.
+// Goal: Maintain a target velocity while staying on the circular track.
+//
+// State: [x, y, yaw, velocity]
+// Control: [steering_angle, acceleration]
+//
+// The agents are initialized at different starting angles along the circle.
+
 mas::OCP
 create_single_track_circular_ocp( double initial_theta, double track_radius, double target_velocity, int time_steps )
 {
@@ -30,16 +41,24 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
   double x0             = track_radius * cos( initial_theta );
   double y0             = track_radius * sin( initial_theta );
   problem.initial_state = Eigen::VectorXd::Zero( problem.state_dim );
-  problem.initial_state << x0, y0, 1.57 + initial_theta, 4.0;
+  problem.initial_state << x0, y0, 1.57 + initial_theta, 4.0; // Start tangential to the circle with some speed
 
   problem.dynamics = single_track_model;
 
-  problem.stage_cost = [target_velocity, track_radius]( const State& state, const Control& control, size_t ) {
-    const double w_track = 1.0, w_speed = 1.0, w_delta = 0.001, w_acc = 0.001;
+  // Cost function weights
+  const double w_track = 1.0;   // Penalty for deviating from the track radius
+  const double w_speed = 1.0;   // Penalty for deviating from target speed
+  const double w_delta = 0.001; // Penalty for steering effort
+  const double w_acc   = 0.001; // Penalty for acceleration effort
+
+  problem.stage_cost = [target_velocity, track_radius, w_track, w_speed, w_delta, w_acc]( const State& state, const Control& control, size_t ) {
     double       x = state( 0 ), y = state( 1 ), vx = state( 3 );
     double       delta = control( 0 ), a_cmd = control( 1 );
+
+    // Distance from the origin should be track_radius
     double       distance_from_track = std::abs( std::sqrt( x * x + y * y ) - track_radius );
     double       speed_error         = vx - target_velocity;
+
     return w_track * distance_from_track * distance_from_track + w_speed * speed_error * speed_error + w_delta * delta * delta
          + w_acc * a_cmd * a_cmd;
   };
@@ -91,6 +110,7 @@ main( int argc, char** argv )
     constexpr double target_velocity = 5.0;
 
     MultiAgentProblem problem;
+    // Distribute agents evenly around the track
     for( int i = 0; i < options.agents; ++i )
     {
       double theta = 2.0 * M_PI * i / options.agents;

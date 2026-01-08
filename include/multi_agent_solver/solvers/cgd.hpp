@@ -9,7 +9,6 @@
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
 namespace mas
@@ -71,10 +70,15 @@ public:
         break;
       }
 
-      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics,
-                                                                     problem.objective_function, problem.dt );
+      // Define augmented cost for this iteration
+      auto augmented_objective = [&]( const StateTrajectory& s, const ControlTrajectory& c ) {
+        return compute_augmented_cost( problem, eq_multipliers, ineq_multipliers, penalty_param, s, c );
+      };
 
-      const double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, problem.objective_function,
+      const ControlGradient gradients = finite_differences_gradient( problem.initial_state, controls, problem.dynamics,
+                                                                     augmented_objective, problem.dt );
+
+      const double step_size = armijo_line_search( problem.initial_state, controls, gradients, problem.dynamics, augmented_objective,
                                                    problem.dt, {} );
 
       ControlTrajectory trial_controls = controls - step_size * gradients;
@@ -100,6 +104,7 @@ public:
       update_lagrange_multipliers( problem, state_trajectory, controls, eq_multipliers, ineq_multipliers, penalty_param );
 
       increase_penalty_parameter( penalty_param, problem, state_trajectory, controls, tolerance );
+      if (penalty_param > 1e6) penalty_param = 1e6; // Cap penalty
 
       if( std::abs( old_cost - trial_cost ) < tolerance && debug )
       {
@@ -114,24 +119,27 @@ private:
   void
   resize_multipliers( const OCP& problem )
   {
+    int horizon = problem.horizon_steps;
+    Control default_control = Control::Zero( problem.control_dim );
+
     if( problem.equality_constraints )
     {
-      const auto m = problem.equality_constraints( problem.initial_state, {} ).size();
-      eq_multipliers.setZero( m );
+      const auto m = problem.equality_constraints( problem.initial_state, default_control ).size();
+      eq_multipliers.setZero( m, horizon );
     }
     else
     {
-      eq_multipliers.resize( 0 );
+      eq_multipliers.resize( 0, 0 );
     }
 
     if( problem.inequality_constraints )
     {
-      const auto p = problem.inequality_constraints( problem.initial_state, {} ).size();
-      ineq_multipliers.setZero( p );
+      const auto p = problem.inequality_constraints( problem.initial_state, default_control ).size();
+      ineq_multipliers.setZero( p, horizon );
     }
     else
     {
-      ineq_multipliers.resize( 0 );
+      ineq_multipliers.resize( 0, 0 );
     }
   }
 
@@ -140,9 +148,9 @@ private:
   double max_ms;
   bool   debug = false;
 
-  ConstraintViolations eq_multipliers;
-  ConstraintViolations ineq_multipliers;
-  double               penalty_param;
+  ConstraintViolationsTrajectory eq_multipliers;
+  ConstraintViolationsTrajectory ineq_multipliers;
+  double                         penalty_param;
 };
 
 } // namespace mas

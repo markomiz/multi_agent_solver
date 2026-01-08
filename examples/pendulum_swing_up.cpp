@@ -94,6 +94,16 @@ create_pendulum_swingup_ocp()
   problem.input_lower_bounds = lower;
   problem.input_upper_bounds = upper;
 
+  // Initialize controls with a resonant sine wave to help finding the swing-up solution
+  // Natural frequency omega_n = sqrt(g/l) = sqrt(9.81/1.0) approx 3.13 rad/s
+  ControlTrajectory u_init( problem.control_dim, problem.horizon_steps );
+  for ( int t = 0; t < problem.horizon_steps; ++t )
+  {
+    double time = t * problem.dt;
+    u_init( 0, t ) = 3.0 * std::sin( 3.13 * time );
+  }
+  problem.initial_controls = u_init;
+
   problem.initialize_problem();
   problem.verify_problem();
   return problem;

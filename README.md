@@ -23,18 +23,18 @@ Additionally, it supports multi-agent coordination through Nash Equilibrium-base
 
 ### Pendulum Swing Up
 
-The classic control problem: swing a pendulum from a resting down position to balance it upright. This example uses an **Energy Shaping** cost formulation to robustly swing up the pendulum by minimizing the difference between the current total energy and the desired potential energy at the top. The formulation uses a "0=Up" convention, starting at $\pi$ (down) and aiming for 0 (up).
+The classic control problem: swing a pendulum from a resting down position to balance it upright. This example uses an **Energy Shaping** cost formulation to robustly swing up the pendulum by minimizing the difference between the current total energy and the desired potential energy at the top. The formulation uses a "0=Up" convention, starting at $\pi$ (down) and aiming for 0 (up). The OSQP solver is recommended for this non-convex task as it effectively finds the swing-up trajectory.
 
 ![Pendulum Swing Up](docs/images/pendulum_swing_up.gif)
 
 **Run it:**
 ```bash
-./build/release/pendulum_swing_up --solver ilqr
+./build/release/pendulum_swing_up --solver osqp
 ```
 
 **Generate the animation:**
 ```bash
-./scripts/animate_example.py pendulum_swing_up -- --solver ilqr
+./scripts/animate_example.py pendulum_swing_up -- --solver osqp
 ```
 
 ### Rocket Max Altitude

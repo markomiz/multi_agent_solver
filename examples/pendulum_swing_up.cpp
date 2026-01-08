@@ -36,7 +36,7 @@ create_pendulum_swingup_ocp()
 
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 100;
+  problem.horizon_steps = 200;
   problem.dt            = 0.05;
 
   // Start hanging down (0 angle, 0 velocity)
@@ -45,10 +45,10 @@ create_pendulum_swingup_ocp()
   problem.dynamics = pendulum_dynamics;
 
   const double theta_goal = M_PI;
-  const double w_theta    = 10.0;
-  const double w_omega    = 10.0;
+  const double w_theta    = 1.0;
+  const double w_omega    = 0.1;
   const double w_torque   = 0.01;
-  const double torque_max = 5.0;
+  const double torque_max = 10.0;
 
   // Stage cost: integrated over the trajectory
   // J = sum( w_theta * (theta - goal)^2 + w_omega * omega^2 + w_torque * torque^2 )
@@ -56,14 +56,18 @@ create_pendulum_swingup_ocp()
     double theta = x( 0 );
     double omega = x( 1 );
     double tau   = u( 0 );
+    // Scaled down to allow more flexibility during the swing-up
     return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) / 100.0;
   };
 
   // Terminal cost: heavily penalize not being at the goal at the end
+  // Weights are significantly higher to "lock" the pendulum at the top
   problem.terminal_cost = [=]( const State& x ) {
+    const double term_w_theta = 10000.0;
+    const double term_w_omega = 100.0;
     double theta = x( 0 );
     double omega = x( 1 );
-    return w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 );
+    return term_w_theta * std::pow( theta - theta_goal, 2 ) + term_w_omega * std::pow( omega, 2 );
   };
 
   // Note: Gradients and Hessians can be provided manually for better performance,

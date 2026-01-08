@@ -61,12 +61,12 @@ Multiple agents (cars) independently trying to maintain a target velocity on a c
 
 **Run it:**
 ```bash
-./build/release/multi_agent_single_track --agents 3 --solver ilqr
+./build/release/multi_agent_single_track --agents 3 --solver ilqr --strategy trustregion
 ```
 
 **Generate the animation:**
 ```bash
-./scripts/animate_example.py multi_agent_single_track -- --agents 3 --solver ilqr
+./scripts/animate_example.py multi_agent_single_track -- --agents 3 --solver ilqr --strategy trustregion
 ```
 
 ---

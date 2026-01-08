@@ -46,7 +46,7 @@ create_pendulum_swingup_ocp()
 
   // Start hanging down (stable equilibrium)
   // Perturb slightly to ensure non-zero gradients for the energy cost
-  problem.initial_state = Eigen::Vector2d( M_PI - 0.5, 0.0 );
+  problem.initial_state = Eigen::Vector2d( M_PI - 0.05, 0.0 );
 
   problem.dynamics = pendulum_dynamics;
 
@@ -58,7 +58,7 @@ create_pendulum_swingup_ocp()
   // Weights
   const double w_energy = 1000.0;
   const double w_ctrl   = 1e-6;
-  const double w_omega  = 0.1; // Regularization
+  const double w_omega  = 1.0; // Regularization
 
   const double term_w_pos = 1000.0;
   const double term_w_vel = 10.0;
@@ -92,7 +92,7 @@ create_pendulum_swingup_ocp()
   // Let's use a limit that requires swinging (cannot lift statically).
   // Static torque required is m*g*l = 9.81.
   // Limit to 5.0 to force energy pumping.
-  const double torque_max = 20.0;
+  const double torque_max = 5.0;
   Eigen::VectorXd lower( 1 ), upper( 1 );
   lower << -torque_max;
   upper << torque_max;

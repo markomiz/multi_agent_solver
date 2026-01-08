@@ -13,20 +13,25 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
-// The Pendulum Swing-Up problem is a classic control challenge.
-// The goal is to swing a pendulum from a resting position (hanging down)
-// to an inverted position (pointing up) and balance it there.
+// The Pendulum Swing-Up problem is reformulated here using Energy Shaping.
 //
-// State: [theta, omega]
-//   theta: angle (0 = hanging down, pi = pointing up)
-//   omega: angular velocity
-// Control: [torque]
-//   torque: applied at the pivot
+// Goal: Swing the pendulum from the stable downward position (theta=pi)
+//       to the unstable upward position (theta=0).
 //
-// The cost function penalizes:
-// 1. Deviation from the goal angle (pi)
-// 2. High angular velocity (we want to stop at the top)
-// 3. Excessive control effort (energy efficiency)
+// Formulation Advice:
+// 1. Minimize "Distance to Desired Energy" instead of "Distance to Upright Angle".
+// 2. Use a long horizon to allow energy accumulation.
+// 3. Use manifold constraints (cos(theta)) for terminal state.
+//
+// Dynamics:
+//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2)
+//   (theta=0 is UP unstable, theta=pi is DOWN stable)
+//
+// Energy:
+//   E = Kinetic + Potential
+//   T = 0.5 * m * l^2 * omega^2
+//   V = m * g * l * cos(theta)  (Max at 0, Min at pi)
+//   E_des = m * g * l (at theta=0)
 
 mas::OCP
 create_pendulum_swingup_ocp()
@@ -36,44 +41,58 @@ create_pendulum_swingup_ocp()
 
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 200;
+  problem.horizon_steps = 200; // 10 seconds
   problem.dt            = 0.05;
 
-  // Start hanging down (0 angle, 0 velocity)
-  problem.initial_state = Eigen::Vector2d::Zero();
+  // Start hanging down (stable equilibrium)
+  // Perturb slightly to ensure non-zero gradients for the energy cost
+  problem.initial_state = Eigen::Vector2d( M_PI - 0.5, 0.0 );
 
   problem.dynamics = pendulum_dynamics;
 
-  const double theta_goal = M_PI;
-  const double w_theta    = 1.0;
-  const double w_omega    = 0.1;
-  const double w_torque   = 0.01;
-  const double torque_max = 10.0;
+  const double g = 9.81;
+  const double l = 1.0;
+  const double m = 1.0;
+  const double E_des = m * g * l; // Potential energy at upright (theta=0)
 
-  // Stage cost: integrated over the trajectory
-  // J = sum( w_theta * (theta - goal)^2 + w_omega * omega^2 + w_torque * torque^2 )
-  problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
+  // Weights
+  const double w_energy = 1000.0;
+  const double w_ctrl   = 1e-6;
+  const double w_omega  = 0.0; // Regularization
+
+  const double term_w_pos = 1000.0;
+  const double term_w_vel = 10.0;
+
+  problem.stage_cost = [=]( const State& x, const Control& u, size_t ) {
     double theta = x( 0 );
     double omega = x( 1 );
-    double tau   = u( 0 );
-    // Scaled down to allow more flexibility during the swing-up
-    return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) / 100.0;
+    double torque = u( 0 );
+
+    // Current Energy
+    double T = 0.5 * m * l * l * omega * omega;
+    double V = m * g * l * std::cos( theta );
+    double E = T + V;
+
+    double energy_error = E - E_des;
+
+    return w_energy * energy_error * energy_error + w_ctrl * torque * torque + w_omega * omega * omega;
   };
 
-  // Terminal cost: heavily penalize not being at the goal at the end
-  // Weights are significantly higher to "lock" the pendulum at the top
+  // Terminal cost: "Lighthouse" to catch the upright state
+  // Using (1 - cos(theta)) handles the periodicity naturally.
+  // 1 - cos(0) = 0
+  // 1 - cos(2pi) = 0
   problem.terminal_cost = [=]( const State& x ) {
-    const double term_w_theta = 10000.0;
-    const double term_w_omega = 100.0;
     double theta = x( 0 );
     double omega = x( 1 );
-    return term_w_theta * std::pow( theta - theta_goal, 2 ) + term_w_omega * std::pow( omega, 2 );
+    return term_w_pos * ( 1.0 - std::cos( theta ) ) + term_w_vel * omega * omega;
   };
 
-  // Note: Gradients and Hessians can be provided manually for better performance,
-  // but the solver can also use automatic differentiation or finite differences if they are not provided.
-  // In this example, we rely on the solver's internal differentiation for simplicity.
-
+  // Input constraints (Voltage/Torque limit)
+  // Let's use a limit that requires swinging (cannot lift statically).
+  // Static torque required is m*g*l = 9.81.
+  // Limit to 5.0 to force energy pumping.
+  const double torque_max = 20.0;
   Eigen::VectorXd lower( 1 ), upper( 1 );
   lower << -torque_max;
   upper << torque_max;
@@ -116,9 +135,9 @@ main( int argc, char** argv )
     OCP problem = create_pendulum_swingup_ocp();
 
     SolverParams params;
-    params["max_iterations"] = 500;
-    params["tolerance"]      = 1e-5;
-    params["max_ms"]         = 1000;
+    params["max_iterations"] = 100;
+    params["tolerance"]      = 1e-4;
+    params["max_ms"]         = 2000;
 
     auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );

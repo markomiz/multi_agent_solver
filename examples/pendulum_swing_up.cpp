@@ -18,8 +18,8 @@
 // Goal: Swing the pendulum from the stable downward position (theta=pi)
 //       to the unstable upward position (theta=0).
 //
-// Dynamics (0=Up):
-//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2)
+// Dynamics (0=Up, +sin):
+//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2) - (b/ml^2)*omega
 //
 // Energy:
 //   E = Kinetic + Potential
@@ -51,12 +51,11 @@ create_pendulum_swingup_ocp()
   const double E_des = m * g * l; // Potential energy at upright (theta=0)
 
   // Weights
-  const double w_energy = 100.0; // Reduced slightly to allow position guidance
-  const double w_pos    = 10.0;  // Guide towards Up
-  const double w_ctrl   = 1e-3;  // Slightly higher control cost to prevent chatter
-  const double w_omega  = 0.1;   // Reduced regularization
+  const double w_energy = 10.0;
+  const double w_ctrl   = 0.1;
+  const double w_omega  = 0.0;
 
-  const double term_w_pos = 1000.0;
+  const double term_w_pos = 500.0;
   const double term_w_vel = 100.0;
 
   problem.stage_cost = [=]( const State& x, const Control& u, size_t ) {
@@ -69,11 +68,11 @@ create_pendulum_swingup_ocp()
     double V = m * g * l * std::cos( theta );
     double E = T + V;
 
-    double energy_error = E - E_des;
+    // Normalized Energy Error: (E - E_des) / mgl
+    // Denominator = m*g*l = 9.81
+    double energy_error = (E - E_des) / (m * g * l);
 
-    // Mix of Energy Shaping and Manifold Attraction
     return w_energy * energy_error * energy_error
-         + w_pos * (1.0 - std::cos(theta))
          + w_ctrl * torque * torque
          + w_omega * omega * omega;
   };
@@ -99,15 +98,8 @@ create_pendulum_swingup_ocp()
   problem.input_lower_bounds = lower;
   problem.input_upper_bounds = upper;
 
-  // Initialize controls with a resonant sine wave to help finding the swing-up solution
-  // Natural frequency omega_n = sqrt(g/l) = sqrt(9.81/1.0) approx 3.13 rad/s
-  ControlTrajectory u_init( problem.control_dim, problem.horizon_steps );
-  for ( int t = 0; t < problem.horizon_steps; ++t )
-  {
-    double time = t * problem.dt;
-    u_init( 0, t ) = 3.0 * std::sin( 3.13 * time );
-  }
-  problem.initial_controls = u_init;
+  // No initial control guess (zero) to test robust formulation
+  problem.initial_controls = ControlTrajectory::Zero( problem.control_dim, problem.horizon_steps );
 
   problem.initialize_problem();
   problem.verify_problem();
@@ -145,9 +137,9 @@ main( int argc, char** argv )
     OCP problem = create_pendulum_swingup_ocp();
 
     SolverParams params;
-    params["max_iterations"] = 500;
+    params["max_iterations"] = 1000;
     params["tolerance"]      = 1e-4;
-    params["max_ms"]         = 2000;
+    params["max_ms"]         = 5000;
 
     auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );

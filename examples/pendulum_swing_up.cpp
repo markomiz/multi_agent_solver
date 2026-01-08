@@ -35,7 +35,7 @@ create_pendulum_swingup_ocp()
 
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 200; // 10 seconds
+  problem.horizon_steps = 100; // 5 seconds
   problem.dt            = 0.05;
 
   // Start hanging down (stable equilibrium)
@@ -77,14 +77,9 @@ create_pendulum_swingup_ocp()
          + w_omega * omega * omega;
   };
 
-  // Terminal cost: "Lighthouse" to catch the upright state (0)
-  // Using (1 - cos(theta)) handles the periodicity naturally.
-  // 1 - cos(0) = 0
-  // 1 - cos(pi) = 2
-  problem.terminal_cost = [=]( const State& x ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    return term_w_pos * ( 1.0 - std::cos( theta ) ) + term_w_vel * omega * omega;
+  // Terminal cost: Removed as requested to rely on energy shaping stage cost
+  problem.terminal_cost = [=]( const State& ) {
+    return 0.0;
   };
 
   // Input constraints (Voltage/Torque limit)

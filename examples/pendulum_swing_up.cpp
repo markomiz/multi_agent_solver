@@ -13,76 +13,103 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
-mas::OCP
-create_pendulum_swingup_ocp()
+// The Pendulum Swing-Up problem is reformulated here using Energy Shaping.
+//
+// Goal: Swing the pendulum from the stable downward position (theta=pi)
+//       to the unstable upward position (theta=0).
+//
+// Dynamics (0=Up):
+//   theta_ddot = (g/l) * sin(theta) + u / (m*l^2) - b*omega
+//
+// Energy:
+//   T = 0.5 * m * l^2 * omega^2
+//   V = m * g * l * cos(theta)
+//   E_des = m * g * l (at theta=0)
+
+mas::OCP create_pendulum_swingup_ocp()
 {
   using namespace mas;
-  OCP problem;
 
+  OCP problem;
   problem.state_dim     = 2;
   problem.control_dim   = 1;
-  problem.horizon_steps = 100;
+  problem.horizon_steps = 60;   // 3 seconds
   problem.dt            = 0.05;
 
-  problem.initial_state = Eigen::Vector2d::Zero();
+  // Downward is theta=pi in your convention; add small perturbation.
+  problem.initial_state = Eigen::Vector2d(M_PI - 0.05, 0.0);
 
   problem.dynamics = pendulum_dynamics;
 
-  const double theta_goal = M_PI;
-  const double w_theta    = 10.0;
-  const double w_omega    = 10.0;
-  const double w_torque   = 0.01;
+  const double g = 9.81;
+  const double l = 1.0;
+  const double m = 1.0;
+
+  const double mgl   = m * g * l;
+  const double E_des = mgl;  // energy at upright with omega=0
+
+  // ---- Weights (tune these first) ----
+  const double w_energy = 2.0;
+  const double w_u      = 0.05;
+  const double w_shape  = 2.0;     // stage "point toward upright"
+  const double w_omega  = 0.05;    // stage damping (small)
+
+  const double wT_pos   = 500.0;   // terminal upright
+  const double wT_vel   = 100.0;   // terminal zero omega
+
+  const double horizon_d = static_cast<double>(problem.horizon_steps);
+
+  problem.stage_cost = [=](const State& x, const Control& u, size_t k) {
+    const double theta  = x(0);
+    const double omega  = x(1);
+    const double torque = u(0);
+
+    // Time-varying weights: Energy matters early, Shaping matters late
+    const double s = static_cast<double>(k) / (horizon_d - 1.0);
+    const double late = s * s;
+    const double early = 1.0 - late;
+
+    const double w_energy_k = w_energy * (0.2 + 0.8 * early);
+    const double w_shape_k  = w_shape * (0.2 + 0.8 * late);
+    const double w_omega_k  = w_omega * (0.2 + 0.8 * late);
+
+    // Energy
+    const double T = 0.5 * m * l * l * omega * omega;
+    const double V = mgl * std::cos(theta);
+    const double E = T + V;
+
+    const double energy_error = (E - E_des) / mgl;
+
+    // Upright shaping: theta=0 is upright => 1 - cos(theta) is 0 at upright, smooth & periodic
+    const double upright_error = 1.0 - std::cos(theta);
+
+    return w_energy_k * energy_error * energy_error
+         + w_shape_k  * upright_error
+         + w_omega_k  * omega * omega
+         + w_u        * torque * torque;
+  };
+
+  problem.terminal_cost = [=](const State& x) {
+    const double theta = x(0);
+    const double omega = x(1);
+
+    const double upright_error = 1.0 - std::cos(theta); // 0 at theta=0
+    return wT_pos * upright_error + wT_vel * omega * omega;
+  };
+
+  // Input constraints
   const double torque_max = 5.0;
+  problem.input_lower_bounds = Eigen::VectorXd::Constant(1, -torque_max);
+  problem.input_upper_bounds = Eigen::VectorXd::Constant(1,  torque_max);
 
-  problem.stage_cost = [=]( const State& x, const Control& u, size_t t_idx ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    double tau   = u( 0 );
-    return ( w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 ) + w_torque * std::pow( tau, 2 ) ) / 100.0;
-  };
+  // Initial guess with tiny sinusoid to break symmetry
+  problem.initial_controls =
+      ControlTrajectory::Zero(problem.control_dim, problem.horizon_steps);
 
-  problem.terminal_cost = [=]( const State& x ) {
-    double theta = x( 0 );
-    double omega = x( 1 );
-    return w_theta * std::pow( theta - theta_goal, 2 ) + w_omega * std::pow( omega, 2 );
-  };
-
-  // problem.cost_state_gradient = [=]( const StageCostFunction&, const State& x, const Control&, size_t ) {
-  //   Eigen::Vector2d grad;
-  //   grad( 0 ) = 2.0 * w_theta * ( x( 0 ) - theta_goal );
-  //   grad( 1 ) = 2.0 * w_omega * x( 1 );
-  //   return grad;
-  // };
-
-  // problem.cost_control_gradient = [=]( const StageCostFunction&, const State&, const Control& u, size_t ) {
-  //   Eigen::VectorXd grad = Eigen::VectorXd::Zero( 1 );
-  //   grad( 0 )            = 2.0 * w_torque * u( 0 );
-  //   return grad;
-  // };
-
-  // problem.cost_state_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 2, 2 );
-  //   H( 0, 0 )         = 2.0 * w_theta;
-  //   H( 1, 1 )         = 2.0 * w_omega;
-  //   return H;
-  // };
-
-  // problem.cost_control_hessian = [=]( const StageCostFunction&, const State&, const Control&, size_t ) {
-  //   Eigen::MatrixXd H = Eigen::MatrixXd::Zero( 1, 1 );
-  //   H( 0, 0 )         = 2.0 * w_torque;
-  //   return H;
-  // };
-
-  // problem.dynamics_state_jacobian = []( const MotionModel&, const State& x, const Control& u ) { return pendulum_state_jacobian( x, u );
-  // }; problem.dynamics_control_jacobian = []( const MotionModel&, const State& x, const Control& u ) {
-  //   return pendulum_control_jacobian( x, u );
-  // };
-
-  Eigen::VectorXd lower( 1 ), upper( 1 );
-  lower << -torque_max;
-  upper << torque_max;
-  problem.input_lower_bounds = lower;
-  problem.input_upper_bounds = upper;
+  for (int k = 0; k < problem.horizon_steps; ++k) {
+    const double t = k * problem.dt;
+    problem.initial_controls(0, k) = 0.2 * torque_max * std::sin(2.0 * M_PI * t);
+  }
 
   problem.initialize_problem();
   problem.verify_problem();
@@ -120,9 +147,9 @@ main( int argc, char** argv )
     OCP problem = create_pendulum_swingup_ocp();
 
     SolverParams params;
-    params["max_iterations"] = 500;
-    params["tolerance"]      = 1e-5;
-    params["max_ms"]         = 1000;
+    params["max_iterations"] = 1000;
+    params["tolerance"]      = 1e-4;
+    params["max_ms"]         = 5000;
 
     auto solver = examples::make_solver( options.solver );
     mas::set_params( solver, params );

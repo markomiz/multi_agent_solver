@@ -9,6 +9,22 @@
 #include "multi_agent_solver/solvers/solver.hpp"
 #include "multi_agent_solver/types.hpp"
 
+// The Rocket Max Altitude problem optimizes the thrust profile of a vertical rocket
+// to reach the maximum possible altitude given a limited fuel mass.
+//
+// State: [altitude, velocity, mass]
+// Control: [thrust]
+//
+// Dynamics are governed by:
+//   dh/dt = v
+//   dv/dt = (thrust / mass) - g
+//   dm/dt = -thrust / exhaust_velocity
+//
+// This is a constrained optimization problem:
+// - Thrust is bounded [0, max_thrust]
+// - Mass decreases over time
+// - Altitude and velocity start at 0
+
 namespace mas
 {
 
@@ -16,9 +32,9 @@ mas::OCP
 create_max_altitude_rocket_ocp()
 {
   RocketParameters params;
-  params.initial_mass     = 1.0;
-  params.gravity          = 9.81;
-  params.exhaust_velocity = 50.0;
+  params.initial_mass     = 1.0;  // [kg]
+  params.gravity          = 9.81; // [m/s^2]
+  params.exhaust_velocity = 50.0; // [m/s] specific impulse related
 
   OCP problem;
   problem.state_dim     = 3;
@@ -32,11 +48,14 @@ create_max_altitude_rocket_ocp()
   problem.dynamics = make_rocket_dynamics( params );
 
   const double max_thrust           = 20.0; // [N]
-  const double w_thrust             = 5e-3;
-  const double w_terminal_altitude  = 15.0;
-  const double w_terminal_velocity  = 2.0;
+
+  // Weights for the cost function
+  const double w_thrust             = 5e-3; // Small penalty on usage to smooth control
+  const double w_terminal_altitude  = 15.0; // Large reward (negative cost) for final altitude
+  const double w_terminal_velocity  = 2.0;  // Penalty for residual velocity at the peak
   const double desired_terminal_vel = 0.0;
 
+  // Stage cost: Minimize control effort slightly (regularization)
   problem.stage_cost = [=]( const State& state, const Control& control, size_t ) {
     const double thrust = control( 0 );
     return 0.5 * w_thrust * thrust * thrust;
@@ -63,6 +82,8 @@ create_max_altitude_rocket_ocp()
     return Eigen::MatrixXd::Zero( state.size(), state.size() );
   };
 
+  // Terminal cost: Maximize altitude (minimize -altitude)
+  // Also try to reach zero velocity at the peak (apogee)
   problem.terminal_cost = [=]( const State& state ) {
     const double altitude       = state( 0 );
     const double velocity_error = state( 1 ) - desired_terminal_vel;
@@ -91,6 +112,7 @@ create_max_altitude_rocket_ocp()
     return rocket_control_jacobian( params, state, control );
   };
 
+  // Constraints
   Eigen::VectorXd u_lower( 1 ), u_upper( 1 );
   u_lower << 0.0;
   u_upper << max_thrust;
@@ -98,11 +120,11 @@ create_max_altitude_rocket_ocp()
   problem.input_upper_bounds = u_upper;
 
   Eigen::VectorXd x_lower    = Eigen::VectorXd::Constant( problem.state_dim, std::numeric_limits<double>::min() );
-  x_lower( 2 )               = 0.0;
+  x_lower( 2 )               = 0.0; // Mass cannot be negative
   problem.state_lower_bounds = x_lower;
 
   Eigen::VectorXd x_upper    = Eigen::VectorXd::Constant( problem.state_dim, std::numeric_limits<double>::max() );
-  x_upper( 2 )               = params.initial_mass;
+  x_upper( 2 )               = params.initial_mass; // Mass cannot exceed initial mass
   problem.state_upper_bounds = x_upper;
 
   // initialize controls with just constant steady thrust

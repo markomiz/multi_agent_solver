@@ -5,7 +5,9 @@
 
 #include "multi_agent_solver/multi_agent_problem.hpp"
 #include "multi_agent_solver/ocp.hpp"
+#ifdef MAS_HAVE_OSQP
 #include "multi_agent_solver/solvers/osqp.hpp"
+#endif
 #include "multi_agent_solver/solvers/ilqr.hpp"
 #include "multi_agent_solver/strategies/centralized.hpp"
 #include "multi_agent_solver/strategies/nash.hpp"
@@ -85,6 +87,7 @@ create_single_track_circular_ocp( double initial_theta, double track_radius, dou
 
 } // namespace
 
+#ifdef MAS_HAVE_OSQP
 TEST( IntegrationTest, SingleTrackCentralizedOSQP )
 {
   SolverParams params;
@@ -143,6 +146,7 @@ TEST( IntegrationTest, SingleTrackCentralizedOSQP )
      EXPECT_TRUE( std::isfinite(v) );
   }
 }
+#endif
 
 TEST( IntegrationTest, SingleTrackCentralizedILQR )
 {

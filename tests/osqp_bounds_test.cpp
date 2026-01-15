@@ -1,3 +1,4 @@
+#ifdef MAS_HAVE_OSQP
 #include <gtest/gtest.h>
 
 #include "multi_agent_solver/ocp.hpp"
@@ -103,3 +104,4 @@ TEST_F( OSQPBoundsTest, OSQPCollocationSolverRespectsStateBounds )
 }
 
 } // namespace mas
+#endif // MAS_HAVE_OSQP

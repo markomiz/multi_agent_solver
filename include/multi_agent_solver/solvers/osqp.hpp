@@ -11,7 +11,7 @@
 
 #include "multi_agent_solver/integrator.hpp"
 #include "multi_agent_solver/ocp.hpp"
-#include "multi_agent_solver/solvers/solver.hpp"
+#include "multi_agent_solver/line_search.hpp"
 #include "multi_agent_solver/types.hpp"
 #include <OsqpEigen/OsqpEigen.h>
 
@@ -87,6 +87,23 @@ public:
     assemble_qp_data( problem, states, controls, reg );
 
 
+    // Check if dimensions OR sparsity changed; if so, trigger re-initialization
+    if( solver_initialized )
+    {
+      if( initialized_qp_dim != qp_dim || initialized_constraint_dim != (int)qp_data.A.rows()
+          || initialized_A_nnz != (int)qp_data.A.nonZeros() || initialized_H_nnz != (int)qp_data.H.nonZeros() )
+      {
+        solver->clearSolver();
+        solver->settings()->setWarmStart( true );
+        solver->settings()->setVerbosity( false );
+        solver->settings()->setAdaptiveRho( true );
+        solver->settings()->setMaxIteration( 1000 );
+        solver->settings()->setScaling( 10 );
+        solver->settings()->setPolish( true );
+        solver_initialized = false;
+      }
+    }
+
     if( !solver_initialized )
     {
       solver->data()->setNumberOfVariables( qp_dim );
@@ -99,13 +116,16 @@ public:
       if( !solver->initSolver() || !solver->isInitialized() )
         throw std::runtime_error( "failed to initialise OSQP" );
       solver_initialized = true;
+      initialized_qp_dim = qp_dim;
+      initialized_constraint_dim = qp_data.A.rows();
+      initialized_A_nnz = qp_data.A.nonZeros();
+      initialized_H_nnz = qp_data.H.nonZeros();
     }
     else
     {
 
       if( !solver->updateHessianMatrix( qp_data.H ) || !solver->updateGradient( qp_data.gradient )
-          || !solver->updateLinearConstraintsMatrix( qp_data.A ) || !solver->updateLowerBound( qp_data.lb )
-          || !solver->updateUpperBound( qp_data.ub ) )
+          || !solver->updateLinearConstraintsMatrix( qp_data.A ) || !solver->updateBounds( qp_data.lb, qp_data.ub ) )
         throw std::runtime_error( "failed to update QP data" );
     }
 
@@ -151,8 +171,12 @@ public:
       assemble_constraints( problem, states, controls );
       assemble_bounds( problem );
 
+      if( !qp_data.gradient.allFinite() ) throw std::runtime_error( "Gradient non-finite" );
+      if( !qp_data.lb.allFinite() ) throw std::runtime_error( "Lower Bound non-finite" );
+      if( !qp_data.ub.allFinite() ) throw std::runtime_error( "Upper Bound non-finite" );
+
       if( !solver->updateGradient( qp_data.gradient ) || !solver->updateLinearConstraintsMatrix( qp_data.A )
-          || !solver->updateLowerBound( qp_data.lb ) || !solver->updateUpperBound( qp_data.ub ) )
+          || !solver->updateBounds( qp_data.lb, qp_data.ub ) )
         throw std::runtime_error( "failed to push QP updates" );
 
       //---------------- solve QP ---------------------------------------
@@ -218,6 +242,11 @@ private:
   int n_dyn_constraints = 0;
   int n_state_bounds    = 0;
   int n_control_bounds  = 0;
+
+  int initialized_qp_dim = 0;
+  int initialized_constraint_dim = 0;
+  int initialized_A_nnz = 0;
+  int initialized_H_nnz = 0;
 
 
   Eigen::VectorXd   solution;
@@ -353,11 +382,24 @@ private:
 
       for( int i = 0; i < nx; ++i )
         for( int j = 0; j < nx; ++j )
-          tri.emplace_back( row_off + i, t * nx + j, -A_t( i, j ) );
+        {
+          double val = -( ( i == j ? 1.0 : 0.0 ) + p.dt * A_t( i, j ) );
+          tri.emplace_back( row_off + i, t * nx + j, val );
+        }
 
       for( int i = 0; i < nx; ++i )
         for( int j = 0; j < nu; ++j )
-          tri.emplace_back( row_off + i, ( T + 1 ) * nx + t * nu + j, -B_t( i, j ) );
+        {
+           double val = -p.dt * B_t( i, j );
+           tri.emplace_back( row_off + i, ( T + 1 ) * nx + t * nu + j, val );
+        }
+
+      // Compute dymaics offset: dt * ( f(x,u) - A*x - B*u )
+      // Constraint: x_{k+1} - (I + dt*A)x_k - dt*B*u_k = dt * ( f_k - A*x_k - B*u_k )
+      State f_val = p.dynamics( x.col( t ), u.col( t ) );
+      State offset = p.dt * ( f_val - A_t * x.col( t ) - B_t * u.col( t ) );
+      qp_data.lb.segment( row_off, nx ) = offset;
+      qp_data.ub.segment( row_off, nx ) = offset;
     }
 
 
@@ -392,8 +434,16 @@ private:
       for( int i = 0; i < nx; ++i )
       {
         const int idx     = sb_off + t * nx + i;
-        qp_data.lb( idx ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) : -OsqpEigen::INFTY;
-        qp_data.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) : OsqpEigen::INFTY;
+        if( t == 0 )
+        {
+          qp_data.lb( idx ) = p.initial_state( i );
+          qp_data.ub( idx ) = p.initial_state( i );
+        }
+        else
+        {
+          qp_data.lb( idx ) = p.state_lower_bounds ? ( *p.state_lower_bounds )( i ) : -OsqpEigen::INFTY;
+          qp_data.ub( idx ) = p.state_upper_bounds ? ( *p.state_upper_bounds )( i ) : OsqpEigen::INFTY;
+        }
       }
 
 
